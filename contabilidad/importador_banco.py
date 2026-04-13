@@ -279,17 +279,60 @@ def parsear_global66(archivo_bytes: bytes, nombre_archivo: str = "") -> Resultad
 # ─────────────────────────────────────────────
 
 def parsear_excel(archivo_bytes: bytes, nombre_archivo: str = "") -> ResultadoImportacion:
-    import openpyxl
-
     resultado = ResultadoImportacion()
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(archivo_bytes), data_only=True)
-    except Exception as e:
-        resultado.errores.append(f"No se pudo abrir el Excel: {e}")
-        return resultado
 
-    ws = wb.active
-    todas_filas = list(ws.iter_rows(values_only=True))
+    # Detectar formato por extensión y magic bytes
+    nombre_lower = nombre_archivo.lower()
+    es_xls = nombre_lower.endswith(".xls") or archivo_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
+
+    todas_filas = []
+
+    if es_xls:
+        # Formato antiguo .xls → usar xlrd
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=archivo_bytes)
+            ws = wb.sheet_by_index(0)
+            for row_idx in range(ws.nrows):
+                fila = []
+                for col_idx in range(ws.ncols):
+                    cell = ws.cell(row_idx, col_idx)
+                    # Convertir tipos de celda xlrd a valores Python
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            dt_tuple = xlrd.xldate_as_tuple(cell.value, wb.datemode)
+                            fila.append(datetime(*dt_tuple[:6]).date() if dt_tuple[3:] == (0,0,0) else datetime(*dt_tuple[:6]))
+                        except Exception:
+                            fila.append(cell.value)
+                    elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                        # Preservar como número (evita que 1234567.0 se convierta en string)
+                        v = cell.value
+                        fila.append(int(v) if v == int(v) else v)
+                    elif cell.ctype == xlrd.XL_CELL_EMPTY:
+                        fila.append(None)
+                    else:
+                        fila.append(cell.value)
+                todas_filas.append(tuple(fila))
+        except ImportError:
+            resultado.errores.append(
+                "Archivo .xls detectado pero falta la librería xlrd. "
+                "Ejecuta: pip install xlrd==2.0.1"
+            )
+            return resultado
+        except Exception as e:
+            resultado.errores.append(f"No se pudo abrir el archivo .xls: {e}")
+            return resultado
+    else:
+        # Formato moderno .xlsx → usar openpyxl
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(archivo_bytes), data_only=True)
+            ws = wb.active
+            todas_filas = list(ws.iter_rows(values_only=True))
+        except Exception as e:
+            resultado.errores.append(f"No se pudo abrir el Excel: {e}")
+            return resultado
+
     resultado.total_filas_archivo = len(todas_filas)
 
     texto_cab = " ".join(str(c).lower() for fila in todas_filas[:6] for c in fila if c)
