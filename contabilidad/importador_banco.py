@@ -278,8 +278,125 @@ def parsear_global66(archivo_bytes: bytes, nombre_archivo: str = "") -> Resultad
 # Parser Excel (Banco de Chile y otros)
 # ─────────────────────────────────────────────
 
+def _es_csv_disfrazado(archivo_bytes: bytes) -> bool:
+    """
+    El Banco de Chile exporta archivos .xls que en realidad son CSV con
+    separador punto y coma. Se detectan porque sus primeros bytes son texto
+    legible (no el magic 0xD0CF del formato binario OLE2 de Excel).
+    """
+    magic_xls  = b'\xd0\xcf\x11\xe0'   # Excel binario real (OLE2)
+    magic_xlsx = b'PK\x03\x04'          # ZIP → xlsx
+    inicio = archivo_bytes[:8]
+    return not (inicio[:4] == magic_xls or inicio[:4] == magic_xlsx)
+
+
+def _parsear_csv_banco_chile(archivo_bytes: bytes) -> ResultadoImportacion:
+    """
+    Parser para el CSV con ; que exporta Banco de Chile con extensión .xls.
+    Formato de montos: +0000200000  (sin decimales, signo + o vacío para abono,
+    signo + para cargo — la columna ya indica si es cargo o abono).
+    """
+    resultado = ResultadoImportacion()
+    resultado.banco_detectado = "Banco de Chile / Edwards"
+
+    try:
+        texto = decodificar(archivo_bytes)
+    except ValueError as e:
+        resultado.errores.append(str(e))
+        return resultado
+
+    lineas = texto.splitlines()
+    resultado.total_filas_archivo = len(lineas)
+
+    # La primera línea suele ser el encabezado de la empresa, la segunda el
+    # encabezado de columnas. Buscamos la fila que contenga "Fecha".
+    fila_enc_idx = None
+    for i, linea in enumerate(lineas):
+        if "fecha" in linea.lower() and ";" in linea:
+            fila_enc_idx = i
+            break
+
+    if fila_enc_idx is None:
+        resultado.errores.append(
+            "No se encontró encabezado en el archivo del Banco de Chile. "
+            "Descarga la cartola desde: Empresas → Cuenta Corriente → Cartola → Exportar."
+        )
+        return resultado
+
+    encabezado = [c.strip().lower() for c in lineas[fila_enc_idx].split(";")]
+
+    # Mapear columnas flexiblemente
+    def col(nombres):
+        for n in nombres:
+            for i, h in enumerate(encabezado):
+                if n in h:
+                    return i
+        return None
+
+    idx_fecha  = col(["fecha"])
+    idx_detalle = col(["detalle", "descripcion", "glosa", "concepto"])
+    idx_cargo  = col(["cheque", "cargo", "débito", "debito", "retiro"])
+    idx_abono  = col(["deposito", "depósito", "abono", "crédito", "credito"])
+    idx_saldo  = col(["saldo"])
+    idx_doc    = col(["docto", "documento", "n°", "folio", "ref"])
+
+    if idx_fecha is None:
+        resultado.errores.append("No se encontró columna de fecha en el archivo.")
+        return resultado
+
+    def parse_monto_banco_chile(valor: str) -> Decimal:
+        """Convierte '+0000200000' o '00000000000' a Decimal."""
+        if not valor:
+            return Decimal("0")
+        s = str(valor).strip().replace("+", "").replace("-", "").replace(".", "").replace(",", "")
+        try:
+            return Decimal(s)
+        except Exception:
+            return Decimal("0")
+
+    for i, linea in enumerate(lineas[fila_enc_idx + 1:], fila_enc_idx + 2):
+        if not linea.strip() or ";" not in linea:
+            continue
+        cols = linea.split(";")
+
+        fecha = parse_fecha(cols[idx_fecha].strip() if idx_fecha is not None and len(cols) > idx_fecha else None)
+        if fecha is None:
+            continue
+
+        detalle = cols[idx_detalle].strip() if idx_detalle is not None and len(cols) > idx_detalle else "Movimiento bancario"
+        if not detalle:
+            detalle = "Movimiento bancario"
+
+        cargo = parse_monto_banco_chile(cols[idx_cargo]) if idx_cargo is not None and len(cols) > idx_cargo else Decimal("0")
+        abono = parse_monto_banco_chile(cols[idx_abono]) if idx_abono is not None and len(cols) > idx_abono else Decimal("0")
+        saldo = parse_monto_banco_chile(cols[idx_saldo]) if idx_saldo is not None and len(cols) > idx_saldo else None
+        documento = cols[idx_doc].strip() if idx_doc is not None and len(cols) > idx_doc else ""
+        if documento in ("0", "00000000000", ""):
+            documento = ""
+
+        if cargo == 0 and abono == 0:
+            continue
+
+        resultado.filas.append(FilaCartola(
+            fecha=fecha,
+            descripcion=detalle[:250],
+            cargo=cargo,
+            abono=abono,
+            saldo=saldo,
+            documento=documento,
+            fila_origen=i,
+        ))
+
+    resultado.total_filas_validas = len(resultado.filas)
+    return resultado
+
+
 def parsear_excel(archivo_bytes: bytes, nombre_archivo: str = "") -> ResultadoImportacion:
     resultado = ResultadoImportacion()
+
+    # Caso especial: Banco de Chile exporta CSV con punto y coma con extensión .xls
+    if _es_csv_disfrazado(archivo_bytes):
+        return _parsear_csv_banco_chile(archivo_bytes)
 
     # Detectar formato por extensión y magic bytes
     nombre_lower = nombre_archivo.lower()
@@ -288,7 +405,7 @@ def parsear_excel(archivo_bytes: bytes, nombre_archivo: str = "") -> ResultadoIm
     todas_filas = []
 
     if es_xls:
-        # Formato antiguo .xls → usar xlrd
+        # Formato antiguo .xls binario → usar xlrd
         try:
             import xlrd
             wb = xlrd.open_workbook(file_contents=archivo_bytes)
