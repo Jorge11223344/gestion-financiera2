@@ -1,0 +1,1897 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestión Financiera</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #1a1d2e;
+    --bg3: #22263a;
+    --border: #2e3250;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --accent: #6366f1;
+    --accent2: #8b5cf6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --blue: #3b82f6;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Layout ── */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 240px; background: var(--bg2); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 24px 0; position: fixed;
+    height: 100vh; overflow-y: auto; z-index: 100;
+  }
+  .sidebar-logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo h2 { font-size: 16px; font-weight: 700; color: var(--accent); }
+  .sidebar-logo p { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .nav-section { padding: 16px 12px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text2); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+    cursor: pointer; color: var(--text2); font-size: 14px; transition: all .2s;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: var(--bg3); color: var(--accent); border-left-color: var(--accent); }
+  .nav-item .icon { font-size: 18px; width: 22px; text-align: center; }
+
+  .main { margin-left: 240px; flex: 1; padding: 28px 32px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Header ── */
+  .page-header { margin-bottom: 28px; }
+  .page-header h1 { font-size: 24px; font-weight: 700; }
+  .page-header p { color: var(--text2); font-size: 14px; margin-top: 4px; }
+
+  /* ── Cards ── */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
+  .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .stat-value { font-size: 24px; font-weight: 700; }
+  .stat-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .stat-green { color: var(--green); }
+  .stat-red { color: var(--red); }
+  .stat-yellow { color: var(--yellow); }
+  .stat-blue { color: var(--blue); }
+
+  /* ── KPI Semáforo ── */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; border-left: 4px solid var(--border);
+  }
+  .kpi-card.verde { border-left-color: var(--green); }
+  .kpi-card.amarillo { border-left-color: var(--yellow); }
+  .kpi-card.rojo { border-left-color: var(--red); }
+  .kpi-icon { font-size: 24px; margin-bottom: 8px; }
+  .kpi-nombre { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+  .kpi-valor { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .kpi-card.verde .kpi-valor { color: var(--green); }
+  .kpi-card.amarillo .kpi-valor { color: var(--yellow); }
+  .kpi-card.rojo .kpi-valor { color: var(--red); }
+  .kpi-mensaje { font-size: 12px; color: var(--text2); line-height: 1.4; }
+
+  /* ── Charts ── */
+  .chart-container { position: relative; height: 240px; }
+  .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+
+  /* ── Tabla ── */
+  .tabla-wrapper { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text2); border-bottom: 1px solid var(--border); }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--bg3); }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .badge-green { background: rgba(34,197,94,.15); color: var(--green); }
+  .badge-red { background: rgba(239,68,68,.15); color: var(--red); }
+  .monto-ingreso { color: var(--green); font-weight: 600; }
+  .monto-egreso { color: var(--red); font-weight: 600; }
+
+  /* ── Formulario ── */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1/-1; }
+  label { font-size: 12px; color: var(--text2); font-weight: 600; }
+  input, select, textarea {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 10px 12px; font-size: 14px; width: 100%;
+    transition: border-color .2s;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 72px; }
+  select option { background: var(--bg3); }
+  .iva-preview { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 13px; color: var(--text2); }
+  .iva-preview span { color: var(--text); font-weight: 600; }
+
+  /* ── Botones ── */
+  .btn {
+    padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    cursor: pointer; border: none; transition: all .2s; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-danger { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid var(--red); }
+  .btn-danger:hover { background: var(--red); color: #fff; }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+  /* ── Filtros ── */
+  .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+  .filters input, .filters select { width: auto; }
+
+  /* ── Período selector ── */
+  .periodo-bar {
+    display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; align-items: center;
+  }
+  .periodo-btn {
+    padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text2);
+    transition: all .2s;
+  }
+  .periodo-btn.active, .periodo-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .periodo-custom { display: flex; gap: 8px; align-items: center; }
+  .periodo-custom input { padding: 6px 10px; width: 140px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 14px 20px;
+    border-radius: var(--radius); font-size: 14px; font-weight: 600;
+    z-index: 9999; opacity: 0; transform: translateY(12px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.success { background: var(--green); color: #fff; }
+  #toast.error { background: var(--red); color: #fff; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 500;
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 600px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .modal-title { font-size: 18px; font-weight: 700; }
+  .modal-close { background: none; border: none; color: var(--text2); font-size: 22px; cursor: pointer; }
+
+  /* ── Config ── */
+  .config-section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 16px; }
+    .grid-4 { grid-template-columns: 1fr 1fr; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .grid-4 { grid-template-columns: 1fr; }
+  }
+
+  .loading { text-align: center; padding: 40px; color: var(--text2); }
+  .empty { text-align: center; padding: 40px; color: var(--text2); }
+  .section-mb { margin-bottom: 24px; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+
+  /* ── Chat asistente ── */
+  .msg-bot, .msg-user { display:flex; }
+  .msg-user { justify-content:flex-end; }
+  .msg-bubble { padding:10px 14px; border-radius:12px; font-size:13px; line-height:1.6; max-width:100%; }
+  .msg-bubble-bot { background:var(--bg3); border:1px solid var(--border); border-radius:4px 12px 12px 12px; color:var(--text); }
+  .msg-bubble-user { background:var(--accent); color:#fff; border-radius:12px 4px 12px 12px; }
+  .msg-typing { display:flex; gap:4px; align-items:center; padding:12px 14px; }
+  .dot { width:7px; height:7px; background:var(--text2); border-radius:50%; animation:blink 1.2s ease-in-out infinite; }
+  .dot:nth-child(2){ animation-delay:.2s; }
+  .dot:nth-child(3){ animation-delay:.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:.3} 40%{opacity:1} }
+
+  /* ── Secciones balance ── */
+  .balance-seccion { margin-bottom:16px; }
+  .balance-seccion-header {
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--bg3); padding:10px 14px; border-radius:8px;
+    cursor:pointer; font-size:13px; font-weight:700; margin-bottom:8px;
+    border-left:4px solid var(--accent);
+  }
+  .balance-seccion-header.pasivo { border-left-color:var(--red); }
+  .balance-seccion-header.patrimonio { border-left-color:var(--green); }
+  .cuenta-row {
+    display:grid; grid-template-columns:auto 1fr 160px 32px;
+    gap:8px; align-items:center; padding:7px 10px;
+    border-bottom:1px solid var(--border); font-size:13px;
+  }
+  .cuenta-row:last-child { border-bottom:none; }
+  .cuenta-codigo { color:var(--text2); font-size:11px; font-family:monospace; }
+  .cuenta-input { background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:13px; color:var(--text); width:100%; text-align:right; }
+  .cuenta-input:focus { outline:none; border-color:var(--accent); }
+  .cuenta-ayuda-btn { background:none; border:none; color:var(--text2); cursor:pointer; font-size:14px; padding:2px; }
+  .cuenta-ayuda-btn:hover { color:var(--accent); }
+  .balance-subtotal { display:flex; justify-content:space-between; padding:8px 10px; font-size:13px; font-weight:700; color:var(--text2); border-top:1px solid var(--border); }
+
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h2>💼 FinanzasPRO</h2>
+    <p id="sidebar-empresa">Mi Empresa</p>
+  </div>
+  <div class="nav-section">Principal</div>
+  <div class="nav-item active" onclick="navTo('dashboard')"><span class="icon">📊</span> Dashboard</div>
+  <div class="nav-section">Movimientos</div>
+  <div class="nav-item" onclick="navTo('nuevo-movimiento')"><span class="icon">➕</span> Nuevo Movimiento</div>
+  <div class="nav-item" onclick="navTo('importar-banco')"><span class="icon">🏦</span> Importar Cartola</div>
+  <div class="nav-item" onclick="navTo('movimientos')"><span class="icon">📋</span> Historial</div>
+  <div class="nav-item" onclick="navTo('cierre-diario')"><span class="icon">🔒</span> Cierre del Día</div>
+  <div class="nav-section">Análisis</div>
+  <div class="nav-item" onclick="navTo('asistente-balance')"><span class="icon">🤖</span> Asistente Contable</div>
+  <div class="nav-item" onclick="navTo('kpis')"><span class="icon">🏥</span> Salud Financiera</div>
+  <div class="nav-item" onclick="navTo('presupuesto')"><span class="icon">🎯</span> Presupuesto</div>
+  <div class="nav-section">Sistema</div>
+  <div class="nav-item" onclick="navTo('configuracion')"><span class="icon">⚙️</span> Configuración</div>
+</aside>
+
+<!-- ── Main ── -->
+<main class="main">
+
+<!-- DASHBOARD -->
+<div id="page-dashboard" class="page active">
+  <div class="page-header">
+    <h1>Dashboard Financiero</h1>
+    <p id="dash-periodo-label">Cargando...</p>
+  </div>
+
+  <!-- Período selector -->
+  <div class="periodo-bar">
+    <button class="periodo-btn active" onclick="setPeriodo('mes', this)">Este mes</button>
+    <button class="periodo-btn" onclick="setPeriodo('semana', this)">Esta semana</button>
+    <button class="periodo-btn" onclick="setPeriodo('anio', this)">Este año</button>
+    <div class="periodo-custom">
+      <input type="date" id="desde-custom" />
+      <span style="color:var(--text2)">a</span>
+      <input type="date" id="hasta-custom" />
+      <button class="btn btn-secondary btn-sm" onclick="setPeriodo('custom', null)">Aplicar</button>
+    </div>
+  </div>
+
+  <!-- Stats principales -->
+  <div class="grid-4">
+    <div class="card">
+      <div class="stat-label">💰 Saldo Actual</div>
+      <div class="stat-value stat-blue" id="stat-saldo">-</div>
+      <div class="stat-sub">Caja + Banco</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">📈 Ingresos del Período</div>
+      <div class="stat-value stat-green" id="stat-ingresos">-</div>
+      <div class="stat-sub" id="stat-ventas-sub">-</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">📉 Egresos del Período</div>
+      <div class="stat-value stat-red" id="stat-egresos">-</div>
+      <div class="stat-sub" id="stat-costos-sub">-</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">🎯 Resultado</div>
+      <div class="stat-value" id="stat-resultado">-</div>
+      <div class="stat-sub" id="stat-margen-sub">-</div>
+    </div>
+  </div>
+
+  <!-- KPIs salud financiera -->
+  <div class="flex-between">
+    <h3 style="font-size:16px;font-weight:700;">🏥 Salud Financiera</h3>
+  </div>
+  <div class="kpi-grid" id="kpi-container">
+    <div class="loading">Calculando indicadores...</div>
+  </div>
+
+  <!-- Gráficos -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="chart-title">Flujo Mensual — <span id="anio-flujo"></span></div>
+      <div class="chart-container"><canvas id="chart-flujo"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Distribución de Gastos</div>
+      <div class="chart-container"><canvas id="chart-gastos"></canvas></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="chart-title">Ventas / Ingresos por Día</div>
+      <div class="chart-container"><canvas id="chart-ventas"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Últimos Movimientos</div>
+      <div class="tabla-wrapper">
+        <table>
+          <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th></tr></thead>
+          <tbody id="tabla-ultimos"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NUEVO MOVIMIENTO -->
+<div id="page-nuevo-movimiento" class="page">
+  <div class="page-header">
+    <h1>Registrar Movimiento</h1>
+    <p>Ingresa ingresos, egresos, suma de boletas o facturas</p>
+  </div>
+  <div class="card" style="max-width:720px;">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Fecha *</label>
+        <input type="date" id="mov-fecha" />
+      </div>
+      <div class="form-group">
+        <label>Tipo de Movimiento *</label>
+        <select id="mov-tipo" onchange="onTipoChange()">
+          <option value="">Selecciona...</option>
+        </select>
+      </div>
+      <div class="form-group full">
+        <label>Descripción *</label>
+        <input type="text" id="mov-descripcion" placeholder="Ej: Ventas del día, Pago proveedor XYZ..." />
+      </div>
+      <div class="form-group">
+        <label>Monto Total ($) *</label>
+        <input type="number" id="mov-monto" placeholder="0" min="1" oninput="onMontoChange()" />
+      </div>
+      <div class="form-group">
+        <label>Medio de Pago</label>
+        <select id="mov-medio-pago">
+          <option value="efectivo">Efectivo</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="cheque">Cheque</option>
+          <option value="tarjeta_debito">Tarjeta Débito</option>
+          <option value="tarjeta_credito">Tarjeta Crédito</option>
+          <option value="nota_credito">Nota de Crédito</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <!-- Campos para boletas/facturas -->
+      <div id="campos-documentos" style="display:none;" class="full">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Cantidad de Documentos</label>
+            <input type="number" id="mov-cantidad-docs" placeholder="Nº de boletas o facturas" min="1" />
+          </div>
+          <div class="form-group">
+            <label>RUT Contraparte</label>
+            <input type="text" id="mov-rut" placeholder="12.345.678-9" />
+          </div>
+          <div class="form-group full">
+            <label>Nombre Cliente / Proveedor</label>
+            <input type="text" id="mov-nombre-contraparte" placeholder="Nombre o razón social" />
+          </div>
+        </div>
+      </div>
+      <!-- Preview IVA -->
+      <div id="iva-preview" style="display:none;" class="full">
+        <div class="iva-preview">
+          <strong>📋 Desglose IVA (19% calculado automáticamente)</strong><br>
+          Monto Neto: <span id="iva-neto">-</span> &nbsp;|&nbsp;
+          IVA: <span id="iva-monto">-</span> &nbsp;|&nbsp;
+          Total: <span id="iva-total">-</span>
+        </div>
+      </div>
+      <div class="form-group full">
+        <label>Notas (opcional)</label>
+        <textarea id="mov-notas" placeholder="Observaciones adicionales..."></textarea>
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarMovimiento()">✅ Guardar Movimiento</button>
+      <button class="btn btn-secondary" onclick="limpiarFormMovimiento()">🔄 Limpiar</button>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORIAL -->
+<div id="page-movimientos" class="page">
+  <div class="page-header">
+    <h1>Historial de Movimientos</h1>
+    <p>Todos los movimientos registrados</p>
+  </div>
+  <div class="filters">
+    <input type="date" id="filtro-desde" />
+    <input type="date" id="filtro-hasta" />
+    <select id="filtro-tipo" style="width:200px;">
+      <option value="">Todos los tipos</option>
+    </select>
+    <button class="btn btn-secondary btn-sm" onclick="cargarMovimientos()">🔍 Filtrar</button>
+    <button class="btn btn-primary btn-sm" onclick="navTo('nuevo-movimiento')">➕ Nuevo</button>
+  </div>
+  <div class="card">
+    <div class="tabla-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Descripción</th>
+            <th>Medio Pago</th>
+            <th>Monto</th>
+            <th>IVA</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tabla-movimientos">
+          <tr><td colspan="7" class="loading">Cargando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="movimientos-stats" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:24px;font-size:13px;color:var(--text2);">
+    </div>
+  </div>
+</div>
+
+<!-- CIERRE DIARIO -->
+<div id="page-cierre-diario" class="page">
+  <div class="page-header">
+    <h1>Cierre del Día</h1>
+    <p>Genera el resumen y cierra la jornada</p>
+  </div>
+  <div style="max-width:600px;">
+    <div class="card section-mb">
+      <h3 style="margin-bottom:16px;font-size:16px;">Registrar Cierre</h3>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Fecha de Cierre</label>
+        <input type="date" id="cierre-fecha" />
+      </div>
+      <div class="form-group" style="margin-bottom:20px;">
+        <label>Notas del día</label>
+        <textarea id="cierre-notas" placeholder="Observaciones del día..."></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="generarCierre()">🔒 Generar Cierre</button>
+    </div>
+    <div class="card" id="cierre-preview" style="display:none;">
+      <h3 style="margin-bottom:16px;font-size:16px;">Vista Previa del Cierre</h3>
+      <div id="cierre-detalle"></div>
+    </div>
+  </div>
+  <div style="margin-top:28px;">
+    <h3 style="margin-bottom:16px;font-size:16px;">Historial de Cierres</h3>
+    <div class="card">
+      <div class="tabla-wrapper">
+        <table>
+          <thead><tr><th>Fecha</th><th>Saldo Inicial</th><th>Ingresos</th><th>Egresos</th><th>Resultado</th><th>Saldo Final</th></tr></thead>
+          <tbody id="tabla-cierres"><tr><td colspan="6" class="loading">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SALUD FINANCIERA -->
+<div id="page-kpis" class="page">
+  <div class="page-header">
+    <h1>Salud Financiera</h1>
+    <p>Indicadores clave para entender cómo va tu empresa</p>
+  </div>
+  <div class="periodo-bar">
+    <button class="periodo-btn active" onclick="setKpiPeriodo('mes', this)">Este mes</button>
+    <button class="periodo-btn" onclick="setKpiPeriodo('trimestre', this)">Último trimestre</button>
+    <button class="periodo-btn" onclick="setKpiPeriodo('anio', this)">Este año</button>
+  </div>
+  <div class="kpi-grid" id="kpi-detalle-container">
+    <div class="loading">Calculando indicadores...</div>
+  </div>
+  <div class="grid-2" style="margin-top:24px;">
+    <div class="card">
+      <div class="chart-title">Estado de Resultados</div>
+      <div id="estado-resultados">
+        <div class="loading">Cargando...</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-title">📖 Guía de Indicadores</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.8;">
+        <p><strong style="color:var(--green)">🟢 Verde</strong> — El indicador está en zona saludable</p>
+        <p><strong style="color:var(--yellow)">🟡 Amarillo</strong> — Atención, puede mejorar</p>
+        <p><strong style="color:var(--red)">🔴 Rojo</strong> — Requiere acción inmediata</p>
+        <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+        <p><strong>Margen Bruto:</strong> Cuánto te queda de cada venta después de pagar lo que vendiste.</p>
+        <p style="margin-top:8px;"><strong>Cobertura de Gastos:</strong> Si vale 1.0x, vendes justo lo necesario. Sobre 1.2x es saludable.</p>
+        <p style="margin-top:8px;"><strong>Punto de Equilibrio:</strong> Cuántos días del mes necesitas vender solo para cubrir costos fijos.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PRESUPUESTO -->
+<div id="page-presupuesto" class="page">
+  <div class="page-header">
+    <h1>Presupuesto</h1>
+    <p>Compara lo planificado versus lo real</p>
+  </div>
+  <div class="filters">
+    <select id="presup-anio" style="width:120px;" onchange="cargarPresupuesto()"></select>
+    <select id="presup-mes" style="width:140px;" onchange="cargarPresupuesto()">
+      <option value="">Todo el año</option>
+      <option value="1">Enero</option><option value="2">Febrero</option>
+      <option value="3">Marzo</option><option value="4">Abril</option>
+      <option value="5">Mayo</option><option value="6">Junio</option>
+      <option value="7">Julio</option><option value="8">Agosto</option>
+      <option value="9">Septiembre</option><option value="10">Octubre</option>
+      <option value="11">Noviembre</option><option value="12">Diciembre</option>
+    </select>
+    <button class="btn btn-primary btn-sm" onclick="modalPresupuesto()">➕ Agregar / Editar</button>
+  </div>
+  <div class="card">
+    <div class="tabla-wrapper">
+      <table>
+        <thead><tr><th>Período</th><th>Categoría</th><th>Presupuestado</th></tr></thead>
+        <tbody id="tabla-presupuesto"><tr><td colspan="3" class="loading">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- IMPORTAR CARTOLA BANCO -->
+<div id="page-importar-banco" class="page">
+  <div class="page-header">
+    <h1>Importar Cartola Bancaria</h1>
+    <p>Sube el Excel que descargaste desde la web de tu banco</p>
+  </div>
+  <div id="import-paso1">
+    <div class="card" style="max-width:600px;">
+      <div style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.8;background:var(--bg3);padding:16px;border-radius:8px;">
+        <strong style="color:var(--text);">Descargar desde tu banco:</strong><br>
+        <strong>Banco de Chile:</strong> Empresas &rarr; Cuenta Corriente &rarr; Cartola &rarr; Exportar Excel<br>
+        <strong>Global66:</strong> Cuenta &rarr; Movimientos &rarr; Descargar CSV (el archivo .csv con punto y coma)<br>
+        <span style="color:var(--text2);font-size:12px;">Tambien compatible con Santander, BCI, Scotiabank. El banco se detecta automaticamente.</span>
+      </div>
+      <div id="dropzone"
+        style="border:2px dashed var(--border);border-radius:12px;padding:48px;text-align:center;cursor:pointer;transition:all .2s;"
+        onclick="document.getElementById('input-archivo').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="onDrop(event)">
+        <div style="font-size:40px;margin-bottom:10px;">&#128194;</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:4px;">Arrastra tu archivo aqui</div>
+        <div style="font-size:13px;color:var(--text2);">o haz clic para seleccionar</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:8px;">Formatos: .xlsx .xls .csv</div>
+      </div>
+      <input type="file" id="input-archivo" accept=".xlsx,.xls,.csv" style="display:none" onchange="onArchivoSeleccionado()" />
+      <div id="archivo-info" style="display:none;margin-top:14px;" class="iva-preview">
+        Archivo: <span id="archivo-nombre" style="color:var(--text);font-weight:600;"></span>
+        &nbsp;|&nbsp; <span id="archivo-tam"></span>
+      </div>
+      <div style="margin-top:20px;">
+        <button class="btn btn-primary" id="btn-previsualizar" onclick="previsualizarCartola()" disabled>
+          Analizar Archivo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="import-paso2" style="display:none;">
+    <div id="import-resumen" style="margin-bottom:20px;"></div>
+    <div class="card" style="max-width:960px;">
+      <div class="flex-between">
+        <h3 style="font-size:15px;font-weight:700;">Movimientos detectados</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="seleccionarTodos(true)">Seleccionar todos</button>
+          <button class="btn btn-secondary btn-sm" onclick="seleccionarTodos(false)">Deseleccionar todos</button>
+        </div>
+      </div>
+      <div class="tabla-wrapper" style="margin-top:14px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px;"></th>
+              <th>Fecha</th>
+              <th>Descripcion del banco</th>
+              <th>Tipo</th>
+              <th>Monto</th>
+              <th>Aviso</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-preview"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:12px;align-items:center;">
+        <button class="btn btn-primary" onclick="confirmarImportacion()">Importar Seleccionados</button>
+        <button class="btn btn-secondary" onclick="resetImport()">Volver</button>
+        <span id="import-contador" style="font-size:13px;color:var(--text2);"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="import-paso3" style="display:none;">
+    <div class="card" style="max-width:500px;text-align:center;padding:48px;">
+      <div style="font-size:52px;margin-bottom:16px;">&#10003;</div>
+      <h2 id="import-exito-msg" style="margin-bottom:10px;"></h2>
+      <p style="color:var(--text2);margin-bottom:28px;">Los movimientos ya estan en el historial y dashboard.</p>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button class="btn btn-primary" onclick="navTo('dashboard')">Ver Dashboard</button>
+        <button class="btn btn-secondary" onclick="resetImport()">Importar otra cartola</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ASISTENTE CONTABLE DE BALANCE -->
+<div id="page-asistente-balance" class="page">
+  <div class="page-header">
+    <h1>Asistente Contable</h1>
+    <p>Contador experto en importaciones · Te guía para armar el balance y registrar correctamente cada cuenta</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;">
+
+    <!-- Panel izquierdo: Balance interactivo -->
+    <div>
+      <div class="card section-mb">
+        <div class="flex-between" style="margin-bottom:16px;">
+          <h3 style="font-size:15px;font-weight:700;">Balance General</h3>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="limpiarBalance()">Nuevo balance</button>
+            <button class="btn btn-primary btn-sm" onclick="verificarBalance()">Verificar cuadre</button>
+          </div>
+        </div>
+
+        <!-- Estado del balance -->
+        <div id="balance-estado" style="display:none;margin-bottom:16px;padding:12px;border-radius:8px;font-size:13px;font-weight:600;"></div>
+
+        <!-- Resumen totales -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+          <div class="card" style="background:var(--bg3);text-align:center;">
+            <div class="stat-label">ACTIVO TOTAL</div>
+            <div class="stat-value stat-blue" id="total-activo-display">$0</div>
+          </div>
+          <div class="card" style="background:var(--bg3);text-align:center;">
+            <div class="stat-label">PASIVO TOTAL</div>
+            <div class="stat-value stat-red" id="total-pasivo-display">$0</div>
+          </div>
+          <div class="card" style="background:var(--bg3);text-align:center;">
+            <div class="stat-label">PATRIMONIO</div>
+            <div class="stat-value stat-green" id="total-patrimonio-display">$0</div>
+          </div>
+        </div>
+
+        <!-- Secciones del balance -->
+        <div id="secciones-balance"></div>
+      </div>
+    </div>
+
+    <!-- Panel derecho: Chat asistente -->
+    <div style="position:sticky;top:20px;">
+      <div class="card" style="height:600px;display:flex;flex-direction:column;">
+
+        <!-- Header chat -->
+        <div style="padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">🧮</div>
+            <div>
+              <div style="font-weight:700;font-size:14px;">Contador IA</div>
+              <div style="font-size:11px;color:var(--text2);">Especialista en importaciones · Chile</div>
+            </div>
+            <div style="margin-left:auto;">
+              <div style="width:8px;height:8px;background:var(--green);border-radius:50%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mensajes -->
+        <div id="chat-mensajes" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:4px;">
+          <!-- mensaje bienvenida -->
+          <div class="msg-bot">
+            <div class="msg-bubble msg-bubble-bot">
+              Hola, soy tu contador IA especializado en empresas importadoras. Estoy aquí para guiarte en el armado del balance.<br><br>
+              Puedo ayudarte con:<br>
+              • Clasificar correctamente cada cuenta<br>
+              • Explicar los asientos contables (cargo/abono)<br>
+              • Tratamiento del IVA de importación<br>
+              • Gastos de internación y costeo de inventario<br>
+              • Verificar que el balance cuadre<br><br>
+              ¿Por dónde quieres empezar?
+            </div>
+          </div>
+        </div>
+
+        <!-- Sugerencias rápidas -->
+        <div id="sugerencias" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+          <button class="btn btn-secondary btn-sm" onclick="sugerencia(this)" style="font-size:11px;padding:4px 10px;">¿Cómo registro el IVA de importación?</button>
+          <button class="btn btn-secondary btn-sm" onclick="sugerencia(this)" style="font-size:11px;padding:4px 10px;">Gastos de internación al inventario</button>
+          <button class="btn btn-secondary btn-sm" onclick="sugerencia(this)" style="font-size:11px;padding:4px 10px;">Mercadería en tránsito</button>
+          <button class="btn btn-secondary btn-sm" onclick="sugerencia(this)" style="font-size:11px;padding:4px 10px;">Diferencia de cambio USD</button>
+          <button class="btn btn-secondary btn-sm" onclick="sugerencia(this)" style="font-size:11px;padding:4px 10px;">El balance no cuadra</button>
+        </div>
+
+        <!-- Input -->
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <textarea id="chat-input" placeholder="Pregunta sobre una cuenta, asiento, o pide ayuda con el balance..." rows="2"
+            style="flex:1;resize:none;font-size:13px;"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"></textarea>
+          <button class="btn btn-primary" id="btn-enviar" onclick="enviarMensaje()" style="align-self:flex-end;padding:10px 14px;">
+            ↑
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- CONFIGURACIÓN -->
+<div id="page-configuracion" class="page">
+  <div class="page-header">
+    <h1>Configuración de la Empresa</h1>
+    <p>Datos generales y saldos iniciales</p>
+  </div>
+  <div style="max-width:720px;">
+    <div class="card">
+      <div class="config-section-title">🏢 Datos de la Empresa</div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Nombre / Razón Social</label>
+          <input type="text" id="cfg-nombre" />
+        </div>
+        <div class="form-group">
+          <label>RUT</label>
+          <input type="text" id="cfg-rut" placeholder="12.345.678-9" />
+        </div>
+        <div class="form-group">
+          <label>Giro Comercial</label>
+          <input type="text" id="cfg-giro" />
+        </div>
+        <div class="form-group full">
+          <label>Dirección</label>
+          <input type="text" id="cfg-direccion" />
+        </div>
+        <div class="form-group">
+          <label>Teléfono</label>
+          <input type="text" id="cfg-telefono" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="cfg-email" />
+        </div>
+      </div>
+      <div class="config-section-title" style="margin-top:24px;">💰 Saldos Iniciales</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Saldo Inicial Caja ($)</label>
+          <input type="number" id="cfg-saldo-caja" />
+        </div>
+        <div class="form-group">
+          <label>Saldo Inicial Banco ($)</label>
+          <input type="number" id="cfg-saldo-banco" />
+        </div>
+        <div class="form-group">
+          <label>Fecha Inicio Operaciones</label>
+          <input type="date" id="cfg-fecha-inicio" />
+        </div>
+      </div>
+      <div style="margin-top:20px;">
+        <button class="btn btn-primary" onclick="guardarConfiguracion()">💾 Guardar Configuración</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<!-- Modal Eliminar -->
+<div class="modal-overlay" id="modal-eliminar">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <span class="modal-title">¿Eliminar movimiento?</span>
+      <button class="modal-close" onclick="closeModal('modal-eliminar')">✕</button>
+    </div>
+    <p style="color:var(--text2);margin-bottom:20px;">Esta acción no se puede deshacer.</p>
+    <div style="display:flex;gap:12px;">
+      <button class="btn btn-danger" onclick="confirmarEliminar()">Eliminar</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-eliminar')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Presupuesto -->
+<div class="modal-overlay" id="modal-presupuesto">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Agregar Presupuesto</span>
+      <button class="modal-close" onclick="closeModal('modal-presupuesto')">✕</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Año</label>
+        <input type="number" id="pb-anio" value="2025" />
+      </div>
+      <div class="form-group">
+        <label>Mes</label>
+        <select id="pb-mes">
+          <option value="1">Enero</option><option value="2">Febrero</option>
+          <option value="3">Marzo</option><option value="4">Abril</option>
+          <option value="5">Mayo</option><option value="6">Junio</option>
+          <option value="7">Julio</option><option value="8">Agosto</option>
+          <option value="9">Septiembre</option><option value="10">Octubre</option>
+          <option value="11">Noviembre</option><option value="12">Diciembre</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Categoría</label>
+        <select id="pb-categoria">
+          <option value="ventas">Ventas / Ingresos</option>
+          <option value="costo_venta">Costo de Ventas</option>
+          <option value="remuneraciones">Remuneraciones</option>
+          <option value="arriendo">Arriendo</option>
+          <option value="servicios_basicos">Servicios Básicos</option>
+          <option value="marketing">Marketing / Publicidad</option>
+          <option value="logistica">Logística / Transporte</option>
+          <option value="impuestos">Impuestos</option>
+          <option value="financiero">Gastos Financieros</option>
+          <option value="otros_gastos">Otros Gastos</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Monto Presupuestado ($)</label>
+        <input type="number" id="pb-monto" placeholder="0" />
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarPresupuesto()">💾 Guardar</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-presupuesto')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+// Estado global
+// ─────────────────────────────────────────────────────────
+let currentPage = 'dashboard';
+let dashDesde = '', dashHasta = '';
+let movToDelete = null;
+let charts = {};
+
+// ─────────────────────────────────────────────────────────
+// Utilidades
+// ─────────────────────────────────────────────────────────
+const fmt = n => '$' + Math.round(n).toLocaleString('es-CL');
+const fmtNum = n => Math.round(n).toLocaleString('es-CL');
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  setTimeout(() => t.className = '', 3000);
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+async function api(url, opts = {}) {
+  const resp = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+    ...opts,
+  });
+  return resp.json();
+}
+
+function getCookie(name) {
+  const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return v ? v.pop() : '';
+}
+
+function today() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+// ─────────────────────────────────────────────────────────
+// Navegación
+// ─────────────────────────────────────────────────────────
+function navTo(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick') && n.getAttribute('onclick').includes(page)) n.classList.add('active');
+  });
+  currentPage = page;
+  if (page === 'dashboard') cargarDashboard();
+  if (page === 'movimientos') cargarMovimientos();
+  if (page === 'cierre-diario') cargarCierres();
+  if (page === 'kpis') cargarKpis();
+  if (page === 'presupuesto') cargarPresupuesto();
+  if (page === 'configuracion') cargarConfiguracion();
+  if (page === 'nuevo-movimiento') initFormMovimiento();
+  if (page === 'importar-banco') cargarTiposParaImport();
+  if (page === 'asistente-balance') initAsistente();
+}
+
+// ─────────────────────────────────────────────────────────
+// Dashboard
+// ─────────────────────────────────────────────────────────
+function getDesdeHasta() {
+  const hoy = new Date();
+  if (dashDesde && dashHasta) return { desde: dashDesde, hasta: dashHasta };
+  // default: mes actual
+  const desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+  return { desde, hasta: today() };
+}
+
+function setPeriodo(tipo, btn) {
+  const hoy = new Date();
+  if (btn) {
+    document.querySelectorAll('.periodo-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  if (tipo === 'mes') {
+    dashDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+    dashHasta = today();
+  } else if (tipo === 'semana') {
+    const d = new Date(hoy); d.setDate(hoy.getDate() - 6);
+    dashDesde = d.toISOString().split('T')[0];
+    dashHasta = today();
+  } else if (tipo === 'anio') {
+    dashDesde = `${hoy.getFullYear()}-01-01`;
+    dashHasta = today();
+  } else if (tipo === 'custom') {
+    dashDesde = document.getElementById('desde-custom').value;
+    dashHasta = document.getElementById('hasta-custom').value;
+    if (!dashDesde || !dashHasta) { showToast('Selecciona ambas fechas', 'error'); return; }
+  }
+  cargarDashboard();
+}
+
+async function cargarDashboard() {
+  const { desde, hasta } = getDesdeHasta();
+  const data = await api(`/api/dashboard?desde=${desde}&hasta=${hasta}`);
+
+  document.getElementById('dash-periodo-label').textContent =
+    `Período: ${desde} al ${hasta}`;
+  document.getElementById('anio-flujo').textContent = new Date().getFullYear();
+
+  // Stats
+  document.getElementById('stat-saldo').textContent = fmt(data.saldo_actual);
+  document.getElementById('stat-ingresos').textContent = fmt(data.resumen.total_ingresos);
+  document.getElementById('stat-ventas-sub').textContent = `Ventas: ${fmt(data.resumen.ventas)}`;
+  document.getElementById('stat-egresos').textContent = fmt(data.resumen.total_egresos);
+  document.getElementById('stat-costos-sub').textContent = `Compras: ${fmt(data.resumen.costos)}`;
+
+  const res = data.resumen.resultado_neto;
+  const resEl = document.getElementById('stat-resultado');
+  resEl.textContent = fmt(res);
+  resEl.className = 'stat-value ' + (res >= 0 ? 'stat-green' : 'stat-red');
+  document.getElementById('stat-margen-sub').textContent =
+    `Margen neto: ${data.resumen.margen_neto}%`;
+
+  // KPIs
+  renderKpis(data.kpis, 'kpi-container');
+
+  // Flujo mensual
+  renderChartFlujo(data.flujo_mensual);
+  renderChartGastos(data.distribucion_gastos);
+  renderChartVentas(data.ventas_por_dia);
+
+  // Últimos movimientos
+  const tbody = document.getElementById('tabla-ultimos');
+  tbody.innerHTML = data.ultimos_movimientos.map(m => `
+    <tr>
+      <td>${m.fecha}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.descripcion}</td>
+      <td class="${m.es_ingreso ? 'monto-ingreso' : 'monto-egreso'}">${m.es_ingreso ? '+' : '-'}${fmt(m.monto)}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin movimientos</td></tr>';
+}
+
+function renderKpis(kpis, containerId) {
+  const c = document.getElementById(containerId);
+  if (!kpis.length) { c.innerHTML = '<div class="empty">Sin datos suficientes para calcular indicadores</div>'; return; }
+  c.innerHTML = kpis.map(k => `
+    <div class="kpi-card ${k.estado}">
+      <div class="kpi-icon">${k.icono}</div>
+      <div class="kpi-nombre">${k.nombre}</div>
+      <div class="kpi-valor">${k.valor}</div>
+      <div class="kpi-mensaje">${k.mensaje}</div>
+    </div>`).join('');
+}
+
+function renderChartFlujo(flujo) {
+  destroyChart('flujo');
+  const ctx = document.getElementById('chart-flujo').getContext('2d');
+  charts['flujo'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: flujo.map(m => m.mes_nombre),
+      datasets: [
+        { label: 'Ingresos', data: flujo.map(m => m.ingresos), backgroundColor: 'rgba(34,197,94,.7)', borderRadius: 4 },
+        { label: 'Egresos', data: flujo.map(m => m.egresos), backgroundColor: 'rgba(239,68,68,.7)', borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#94a3b8', callback: v => '$' + (v/1000).toFixed(0) + 'k' }, grid: { color: 'rgba(255,255,255,.05)' } },
+      }
+    }
+  });
+}
+
+function renderChartGastos(gastos) {
+  destroyChart('gastos');
+  if (!gastos.length) return;
+  const ctx = document.getElementById('chart-gastos').getContext('2d');
+  const colors = ['#6366f1','#8b5cf6','#ec4899','#ef4444','#f97316','#eab308','#22c55e','#06b6d4'];
+  charts['gastos'] = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: gastos.map(g => g.categoria),
+      datasets: [{ data: gastos.map(g => g.total), backgroundColor: colors.slice(0, gastos.length), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.raw)}` } }
+      }
+    }
+  });
+}
+
+function renderChartVentas(ventas) {
+  destroyChart('ventas');
+  if (!ventas.length) return;
+  const ctx = document.getElementById('chart-ventas').getContext('2d');
+  charts['ventas'] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: ventas.map(v => v.fecha.slice(5)),
+      datasets: [{ label: 'Ingresos', data: ventas.map(v => v.total), borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.1)', tension: 0.4, fill: true, pointRadius: 3 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#94a3b8', callback: v => '$' + (v/1000).toFixed(0) + 'k' }, grid: { color: 'rgba(255,255,255,.05)' } },
+      }
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// Formulario Movimiento
+// ─────────────────────────────────────────────────────────
+async function initFormMovimiento() {
+  document.getElementById('mov-fecha').value = today();
+  const data = await api('/api/tipos');
+  const sel = document.getElementById('mov-tipo');
+  sel.innerHTML = '<option value="">Selecciona...</option>';
+  data.tipos.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.value; opt.textContent = t.label;
+    sel.appendChild(opt);
+  });
+  // También llenar filtro de historial
+  const filtro = document.getElementById('filtro-tipo');
+  filtro.innerHTML = '<option value="">Todos los tipos</option>';
+  data.tipos.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.value; opt.textContent = t.label;
+    filtro.appendChild(opt);
+  });
+}
+
+function onTipoChange() {
+  const tipo = document.getElementById('mov-tipo').value;
+  const esBolFac = ['suma_boletas', 'suma_facturas_emitidas', 'suma_facturas_recibidas'].includes(tipo);
+  const esFact = ['suma_facturas_emitidas', 'suma_facturas_recibidas'].includes(tipo);
+  document.getElementById('campos-documentos').style.display = esBolFac ? 'block' : 'none';
+  document.getElementById('iva-preview').style.display = esFact ? 'block' : 'none';
+  if (esFact) onMontoChange();
+}
+
+async function onMontoChange() {
+  const tipo = document.getElementById('mov-tipo').value;
+  const monto = document.getElementById('mov-monto').value;
+  const esFact = ['suma_facturas_emitidas', 'suma_facturas_recibidas'].includes(tipo);
+  if (!esFact || !monto) return;
+  const data = await api(`/api/calcular-iva?monto=${monto}`);
+  document.getElementById('iva-neto').textContent = fmt(data.neto);
+  document.getElementById('iva-monto').textContent = fmt(data.iva);
+  document.getElementById('iva-total').textContent = fmt(data.bruto);
+}
+
+async function guardarMovimiento() {
+  const fecha = document.getElementById('mov-fecha').value;
+  const tipo = document.getElementById('mov-tipo').value;
+  const descripcion = document.getElementById('mov-descripcion').value.trim();
+  const monto = document.getElementById('mov-monto').value;
+
+  if (!fecha || !tipo || !descripcion || !monto) {
+    showToast('Completa todos los campos requeridos', 'error'); return;
+  }
+
+  const body = {
+    fecha, tipo, descripcion, monto: parseFloat(monto),
+    medio_pago: document.getElementById('mov-medio-pago').value,
+    notas: document.getElementById('mov-notas').value,
+    cantidad_documentos: document.getElementById('mov-cantidad-docs').value || null,
+    rut_contraparte: document.getElementById('mov-rut').value,
+    nombre_contraparte: document.getElementById('mov-nombre-contraparte').value,
+  };
+
+  const data = await api('/api/movimientos', { method: 'POST', body: JSON.stringify(body) });
+  if (data.error) { showToast(data.error, 'error'); return; }
+
+  let msg = '✅ Movimiento guardado';
+  if (data.monto_neto) msg += ` | Neto: ${fmt(data.monto_neto)} | IVA: ${fmt(data.monto_iva)}`;
+  showToast(msg);
+  limpiarFormMovimiento();
+}
+
+function limpiarFormMovimiento() {
+  document.getElementById('mov-fecha').value = today();
+  document.getElementById('mov-tipo').value = '';
+  document.getElementById('mov-descripcion').value = '';
+  document.getElementById('mov-monto').value = '';
+  document.getElementById('mov-notas').value = '';
+  document.getElementById('mov-cantidad-docs').value = '';
+  document.getElementById('mov-rut').value = '';
+  document.getElementById('mov-nombre-contraparte').value = '';
+  document.getElementById('campos-documentos').style.display = 'none';
+  document.getElementById('iva-preview').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────
+// Historial Movimientos
+// ─────────────────────────────────────────────────────────
+async function cargarMovimientos() {
+  const desde = document.getElementById('filtro-desde').value;
+  const hasta = document.getElementById('filtro-hasta').value;
+  const tipo = document.getElementById('filtro-tipo').value;
+
+  let url = '/api/movimientos?limit=200';
+  if (desde) url += `&desde=${desde}`;
+  if (hasta) url += `&hasta=${hasta}`;
+  if (tipo) url += `&tipo=${tipo}`;
+
+  const data = await api(url);
+  const tbody = document.getElementById('tabla-movimientos');
+
+  if (!data.movimientos.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Sin movimientos para este período</td></tr>';
+    return;
+  }
+
+  let totIngreso = 0, totEgreso = 0;
+  tbody.innerHTML = data.movimientos.map(m => {
+    if (m.es_ingreso) totIngreso += m.monto; else totEgreso += m.monto;
+    return `
+    <tr>
+      <td>${m.fecha}</td>
+      <td><span class="badge ${m.es_ingreso ? 'badge-green' : 'badge-red'}">${m.tipo_display}</span></td>
+      <td style="max-width:200px;">${m.descripcion}${m.cantidad_documentos ? ` <small style="color:var(--text2)">(${m.cantidad_documentos} docs)</small>` : ''}</td>
+      <td style="color:var(--text2);">${m.medio_pago_display}</td>
+      <td class="${m.es_ingreso ? 'monto-ingreso' : 'monto-egreso'}">${m.es_ingreso ? '+' : '-'}${fmt(m.monto)}</td>
+      <td style="color:var(--text2);font-size:12px;">${m.monto_iva ? fmt(m.monto_iva) : '-'}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="eliminarMovimiento('${m.id}')">🗑</button></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('movimientos-stats').innerHTML =
+    `<span>Total registros: <strong>${data.movimientos.length}</strong></span>
+     <span>Ingresos: <strong style="color:var(--green)">${fmt(totIngreso)}</strong></span>
+     <span>Egresos: <strong style="color:var(--red)">${fmt(totEgreso)}</strong></span>
+     <span>Resultado: <strong style="color:${totIngreso-totEgreso>=0?'var(--green)':'var(--red)'}">${fmt(totIngreso-totEgreso)}</strong></span>`;
+}
+
+function eliminarMovimiento(id) {
+  movToDelete = id;
+  document.getElementById('modal-eliminar').classList.add('show');
+}
+
+async function confirmarEliminar() {
+  if (!movToDelete) return;
+  await api(`/api/movimientos/${movToDelete}`, { method: 'DELETE' });
+  closeModal('modal-eliminar');
+  showToast('Movimiento eliminado');
+  movToDelete = null;
+  cargarMovimientos();
+}
+
+// ─────────────────────────────────────────────────────────
+// Cierre Diario
+// ─────────────────────────────────────────────────────────
+async function generarCierre() {
+  const fecha = document.getElementById('cierre-fecha').value || today();
+  const notas = document.getElementById('cierre-notas').value;
+
+  const data = await api('/api/cierres', { method: 'POST', body: JSON.stringify({ fecha, notas }) });
+  if (data.error) { showToast(data.error, 'error'); return; }
+
+  const preview = document.getElementById('cierre-preview');
+  preview.style.display = 'block';
+  const r = data.resultado >= 0;
+  document.getElementById('cierre-detalle').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px;">
+      <div>Fecha: <strong>${data.fecha}</strong></div>
+      <div>Saldo Final: <strong style="color:var(--blue)">${fmt(data.saldo_final)}</strong></div>
+      <div>Resultado del día: <strong style="color:${r?'var(--green)':'var(--red)'}">${fmt(data.resultado)}</strong></div>
+    </div>`;
+  showToast('✅ Cierre generado exitosamente');
+  cargarCierres();
+}
+
+async function cargarCierres() {
+  document.getElementById('cierre-fecha').value = today();
+  const data = await api('/api/cierres?limit=30');
+  const tbody = document.getElementById('tabla-cierres');
+  tbody.innerHTML = data.cierres.map(c => `
+    <tr>
+      <td>${c.fecha}</td>
+      <td>${fmt(c.saldo_inicial_caja)}</td>
+      <td class="monto-ingreso">+${fmt(c.total_ingresos)}</td>
+      <td class="monto-egreso">-${fmt(c.total_egresos)}</td>
+      <td class="${c.resultado_dia>=0?'monto-ingreso':'monto-egreso'}">${fmt(c.resultado_dia)}</td>
+      <td style="color:var(--blue);font-weight:600;">${fmt(c.saldo_final_caja)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="empty">Sin cierres registrados</td></tr>';
+}
+
+// ─────────────────────────────────────────────────────────
+// KPIs / Salud Financiera
+// ─────────────────────────────────────────────────────────
+let kpiDesde = '', kpiHasta = '';
+
+function setKpiPeriodo(tipo, btn) {
+  document.querySelectorAll('#page-kpis .periodo-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const hoy = new Date();
+  if (tipo === 'mes') {
+    kpiDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+    kpiHasta = today();
+  } else if (tipo === 'trimestre') {
+    const d = new Date(hoy); d.setMonth(hoy.getMonth() - 3);
+    kpiDesde = d.toISOString().split('T')[0];
+    kpiHasta = today();
+  } else if (tipo === 'anio') {
+    kpiDesde = `${hoy.getFullYear()}-01-01`;
+    kpiHasta = today();
+  }
+  cargarKpis();
+}
+
+async function cargarKpis() {
+  if (!kpiDesde) {
+    const hoy = new Date();
+    kpiDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+    kpiHasta = today();
+  }
+  const data = await api(`/api/dashboard?desde=${kpiDesde}&hasta=${kpiHasta}`);
+  renderKpis(data.kpis, 'kpi-detalle-container');
+
+  const r = data.resumen;
+  document.getElementById('estado-resultados').innerHTML = `
+    <table style="width:100%;font-size:13px;">
+      <tr><td style="color:var(--text2);padding:6px 0;">Ventas / Ingresos</td><td style="text-align:right;color:var(--green);font-weight:600;">${fmt(r.ventas)}</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0;">(-) Costo de Ventas</td><td style="text-align:right;color:var(--red);">(${fmt(r.costos)})</td></tr>
+      <tr style="border-top:1px solid var(--border);">
+        <td style="padding:8px 0;font-weight:700;">Utilidad Bruta</td>
+        <td style="text-align:right;font-weight:700;color:${r.utilidad_bruta>=0?'var(--green)':'var(--red)'};">${fmt(r.utilidad_bruta)}</td>
+      </tr>
+      <tr><td style="color:var(--text2);padding:6px 0;">Margen Bruto</td><td style="text-align:right;color:var(--text2);">${r.margen_bruto}%</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0;">(-) Remuneraciones</td><td style="text-align:right;color:var(--red);">(${fmt(r.remuneraciones)})</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0;">(-) Impuestos</td><td style="text-align:right;color:var(--red);">(${fmt(r.impuestos)})</td></tr>
+      <tr style="border-top:1px solid var(--border);">
+        <td style="padding:8px 0;font-weight:700;">Utilidad Operacional</td>
+        <td style="text-align:right;font-weight:700;color:${r.utilidad_operacional>=0?'var(--green)':'var(--red)'};">${fmt(r.utilidad_operacional)}</td>
+      </tr>
+      <tr style="border-top:2px solid var(--border);background:var(--bg3);">
+        <td style="padding:10px 8px;font-weight:700;font-size:15px;">RESULTADO NETO</td>
+        <td style="text-align:right;font-weight:700;font-size:15px;color:${r.resultado_neto>=0?'var(--green)':'var(--red)'};">${fmt(r.resultado_neto)}</td>
+      </tr>
+    </table>`;
+}
+
+// ─────────────────────────────────────────────────────────
+// Presupuesto
+// ─────────────────────────────────────────────────────────
+function initPresupuestoFiltros() {
+  const sel = document.getElementById('presup-anio');
+  const anio = new Date().getFullYear();
+  sel.innerHTML = '';
+  for (let y = anio - 1; y <= anio + 1; y++) {
+    sel.innerHTML += `<option value="${y}" ${y === anio ? 'selected' : ''}>${y}</option>`;
+  }
+}
+
+async function cargarPresupuesto() {
+  const anio = document.getElementById('presup-anio').value;
+  const mes = document.getElementById('presup-mes').value;
+  let url = `/api/presupuesto?anio=${anio}`;
+  if (mes) url += `&mes=${mes}`;
+  const data = await api(url);
+  const tbody = document.getElementById('tabla-presupuesto');
+  tbody.innerHTML = data.presupuestos.map(p => `
+    <tr>
+      <td>${p.anio}/${String(p.mes).padStart(2,'0')}</td>
+      <td>${p.categoria_display}</td>
+      <td style="font-weight:600;">${fmt(p.monto_presupuestado)}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin presupuesto configurado</td></tr>';
+}
+
+function modalPresupuesto() {
+  document.getElementById('pb-anio').value = new Date().getFullYear();
+  document.getElementById('pb-mes').value = new Date().getMonth() + 1;
+  document.getElementById('modal-presupuesto').classList.add('show');
+}
+
+async function guardarPresupuesto() {
+  const body = {
+    anio: parseInt(document.getElementById('pb-anio').value),
+    mes: parseInt(document.getElementById('pb-mes').value),
+    categoria: document.getElementById('pb-categoria').value,
+    monto_presupuestado: parseFloat(document.getElementById('pb-monto').value),
+  };
+  if (!body.monto_presupuestado) { showToast('Ingresa un monto', 'error'); return; }
+  await api('/api/presupuesto', { method: 'POST', body: JSON.stringify(body) });
+  closeModal('modal-presupuesto');
+  showToast('✅ Presupuesto guardado');
+  cargarPresupuesto();
+}
+
+// ─────────────────────────────────────────────────────────
+// Configuración
+// ─────────────────────────────────────────────────────────
+async function cargarConfiguracion() {
+  const data = await api('/api/configuracion');
+  document.getElementById('cfg-nombre').value = data.nombre || '';
+  document.getElementById('cfg-rut').value = data.rut || '';
+  document.getElementById('cfg-giro').value = data.giro || '';
+  document.getElementById('cfg-direccion').value = data.direccion || '';
+  document.getElementById('cfg-telefono').value = data.telefono || '';
+  document.getElementById('cfg-email').value = data.email || '';
+  document.getElementById('cfg-saldo-caja').value = data.saldo_inicial_caja || 0;
+  document.getElementById('cfg-saldo-banco').value = data.saldo_inicial_banco || 0;
+  document.getElementById('cfg-fecha-inicio').value = data.fecha_inicio_operaciones || '';
+}
+
+async function guardarConfiguracion() {
+  const body = {
+    nombre: document.getElementById('cfg-nombre').value,
+    rut: document.getElementById('cfg-rut').value,
+    giro: document.getElementById('cfg-giro').value,
+    direccion: document.getElementById('cfg-direccion').value,
+    telefono: document.getElementById('cfg-telefono').value,
+    email: document.getElementById('cfg-email').value,
+    saldo_inicial_caja: parseFloat(document.getElementById('cfg-saldo-caja').value) || 0,
+    saldo_inicial_banco: parseFloat(document.getElementById('cfg-saldo-banco').value) || 0,
+    fecha_inicio_operaciones: document.getElementById('cfg-fecha-inicio').value || null,
+  };
+  await api('/api/configuracion', { method: 'POST', body: JSON.stringify(body) });
+  document.getElementById('sidebar-empresa').textContent = body.nombre;
+  showToast('✅ Configuración guardada');
+}
+
+// ─────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────
+async function init() {
+  // Cargar nombre empresa
+  const cfg = await api('/api/configuracion');
+  document.getElementById('sidebar-empresa').textContent = cfg.nombre;
+  document.title = cfg.nombre + ' — Finanzas';
+
+  // Cargar tipos para filtros
+  await initFormMovimiento();
+  initPresupuestoFiltros();
+
+  // Cargar dashboard inicial
+  cargarDashboard();
+}
+
+// ─────────────────────────────────────────────────────────
+// Importador de Cartola Bancaria
+// ─────────────────────────────────────────────────────────
+let archivoCartola = null;
+let movimientosPreview = [];
+let tiposDisponibles = [];
+
+// Cargar tipos disponibles para el selector
+async function cargarTiposParaImport() {
+  const data = await api('/api/tipos');
+  tiposDisponibles = data.tipos;
+}
+
+function onArchivoSeleccionado() {
+  const input = document.getElementById('input-archivo');
+  if (input.files[0]) setArchivo(input.files[0]);
+}
+
+function onDrop(event) {
+  event.preventDefault();
+  document.getElementById('dropzone').style.borderColor = 'var(--border)';
+  const file = event.dataTransfer.files[0];
+  if (file) setArchivo(file);
+}
+
+function setArchivo(file) {
+  archivoCartola = file;
+  const kb = (file.size / 1024).toFixed(1);
+  document.getElementById('archivo-nombre').textContent = file.name;
+  document.getElementById('archivo-tam').textContent = kb + ' KB';
+  document.getElementById('archivo-info').style.display = 'block';
+  document.getElementById('btn-previsualizar').disabled = false;
+  document.getElementById('dropzone').style.borderColor = 'var(--accent)';
+}
+
+async function previsualizarCartola() {
+  if (!archivoCartola) return;
+
+  const btn = document.getElementById('btn-previsualizar');
+  btn.disabled = true;
+  btn.textContent = 'Analizando...';
+
+  const form = new FormData();
+  form.append('archivo', archivoCartola);
+
+  try {
+    const resp = await fetch('/api/banco/preview', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      body: form,
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      showToast(data.error, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Analizar Archivo';
+      return;
+    }
+
+    movimientosPreview = data.movimientos.map(m => ({ ...m, incluir: !m.posible_duplicado }));
+
+    // Resumen del análisis
+    const s = data.estadisticas;
+    const advertencias = data.advertencias.map(a => `<li style="color:var(--yellow);">${a}</li>`).join('');
+    document.getElementById('import-resumen').innerHTML = `
+      <div class="grid-4">
+        <div class="card"><div class="stat-label">Banco detectado</div><div style="font-size:16px;font-weight:700;color:var(--accent);">${data.banco_detectado}</div></div>
+        <div class="card"><div class="stat-label">Movimientos encontrados</div><div class="stat-value stat-blue">${data.total_filas_validas}</div></div>
+        <div class="card"><div class="stat-label">Ingresos del período</div><div class="stat-value stat-green">$${s.total_ingresos.toLocaleString('es-CL')}</div></div>
+        <div class="card"><div class="stat-label">Egresos del período</div><div class="stat-value stat-red">$${s.total_egresos.toLocaleString('es-CL')}</div></div>
+      </div>
+      ${s.posibles_duplicados > 0 ? `<div style="background:rgba(234,179,8,.1);border:1px solid var(--yellow);border-radius:8px;padding:12px;font-size:13px;color:var(--yellow);margin-top:8px;">
+        ⚠️ Se detectaron <strong>${s.posibles_duplicados}</strong> posibles duplicados (ya existentes). Aparecen desmarcados — revisa antes de importar.
+      </div>` : ''}
+      ${advertencias ? `<ul style="margin-top:8px;padding-left:20px;">${advertencias}</ul>` : ''}
+    `;
+
+    renderTablaPreview();
+
+    document.getElementById('import-paso1').style.display = 'none';
+    document.getElementById('import-paso2').style.display = 'block';
+
+  } catch (e) {
+    showToast('Error al procesar el archivo: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Analizar Archivo';
+  }
+}
+
+function renderTablaPreview() {
+  const tbody = document.getElementById('tabla-preview');
+  const seleccionados = movimientosPreview.filter(m => m.incluir).length;
+  document.getElementById('import-contador').textContent =
+    `${seleccionados} de ${movimientosPreview.length} seleccionados`;
+
+  const opcionTipos = tiposDisponibles.map(t =>
+    `<option value="${t.value}">${t.label}</option>`
+  ).join('');
+
+  tbody.innerHTML = movimientosPreview.map((m, i) => {
+    const esIngreso = ['ingreso_banco','ingreso_caja','otro_ingreso','prestamo_recibido',
+      'suma_boletas','suma_facturas_emitidas'].includes(m.tipo);
+    return `
+    <tr style="${!m.incluir ? 'opacity:.45;' : ''}">
+      <td><input type="checkbox" ${m.incluir ? 'checked' : ''} onchange="toggleMovimiento(${i}, this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);"></td>
+      <td style="white-space:nowrap;">${m.fecha}</td>
+      <td style="max-width:220px;font-size:12px;color:var(--text2);">${m.descripcion}</td>
+      <td>
+        <select onchange="cambiarTipo(${i}, this.value)" style="font-size:12px;padding:4px 8px;width:200px;">
+          ${tiposDisponibles.map(t => `<option value="${t.value}" ${t.value === m.tipo ? 'selected' : ''}>${t.label}</option>`).join('')}
+        </select>
+      </td>
+      <td class="${esIngreso ? 'monto-ingreso' : 'monto-egreso'}" style="white-space:nowrap;">
+        ${esIngreso ? '+' : '-'}$${m.monto.toLocaleString('es-CL')}
+      </td>
+      <td style="font-size:11px;">
+        ${m.posible_duplicado ? '<span style="color:var(--yellow);">⚠️ Posible duplicado</span>' : '<span style="color:var(--green);">✓ Nuevo</span>'}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleMovimiento(idx, checked) {
+  movimientosPreview[idx].incluir = checked;
+  renderTablaPreview();
+}
+
+function cambiarTipo(idx, nuevoTipo) {
+  movimientosPreview[idx].tipo = nuevoTipo;
+}
+
+function seleccionarTodos(estado) {
+  movimientosPreview.forEach(m => m.incluir = estado);
+  renderTablaPreview();
+}
+
+async function confirmarImportacion() {
+  const seleccionados = movimientosPreview.filter(m => m.incluir);
+  if (!seleccionados.length) { showToast('Selecciona al menos un movimiento', 'error'); return; }
+
+  const data = await api('/api/banco/confirmar', {
+    method: 'POST',
+    body: JSON.stringify({ movimientos: movimientosPreview }),
+  });
+
+  if (data.error) { showToast(data.error, 'error'); return; }
+
+  document.getElementById('import-paso2').style.display = 'none';
+  document.getElementById('import-paso3').style.display = 'block';
+  document.getElementById('import-exito-msg').textContent = data.mensaje;
+}
+
+function resetImport() {
+  archivoCartola = null;
+  movimientosPreview = [];
+  document.getElementById('input-archivo').value = '';
+  document.getElementById('archivo-info').style.display = 'none';
+  document.getElementById('dropzone').style.borderColor = 'var(--border)';
+  document.getElementById('btn-previsualizar').disabled = true;
+  document.getElementById('btn-previsualizar').textContent = 'Analizar Archivo';
+  document.getElementById('import-paso1').style.display = 'block';
+  document.getElementById('import-paso2').style.display = 'none';
+  document.getElementById('import-paso3').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────
+// ASISTENTE CONTABLE DE BALANCE
+// ─────────────────────────────────────────────────────────
+let historialChat = [];
+let estructuraBalance = null;
+let valoresBalance = {};
+
+async function initAsistente() {
+  if (estructuraBalance) return;
+
+  // 1. Verificar estado de API key
+  const estado = await api('/api/asistente/estado');
+  const chatDiv = document.getElementById('chat-mensajes');
+  if (!estado.configurada) {
+    const avisoDiv = document.createElement('div');
+    avisoDiv.className = 'msg-bot';
+    avisoDiv.innerHTML = `<div class="msg-bubble msg-bubble-bot" style="border-color:var(--yellow);background:rgba(234,179,8,.08);">
+      <strong style="color:var(--yellow);">⚙️ API key no configurada</strong><br><br>
+      Para usar el asistente IA necesitas configurar tu API key de Anthropic:<br><br>
+      <strong>1.</strong> Crea el archivo <code>.env</code> en la carpeta del proyecto<br>
+      <strong>2.</strong> Agrega esta línea:<br>
+      <code style="display:block;margin:6px 0;padding:8px;background:var(--bg);border-radius:6px;">ANTHROPIC_API_KEY=sk-ant-api03-TU-KEY-AQUI</code>
+      <strong>3.</strong> Obtén tu key en <strong>console.anthropic.com</strong> → API Keys<br>
+      <strong>4.</strong> Reinicia el servidor después de guardar el .env<br><br>
+      <span style="color:var(--text2);font-size:12px;">El balance interactivo funciona sin la key. Solo el chat requiere conexión a la API.</span>
+    </div>`;
+    chatDiv.appendChild(avisoDiv);
+  } else {
+    const okDiv = document.createElement('div');
+    okDiv.className = 'msg-bot';
+    okDiv.innerHTML = `<div class="msg-bubble msg-bubble-bot" style="border-color:var(--green);background:rgba(34,197,94,.06);">
+      <span style="color:var(--green);">✅ Conectado</span> · API key configurada (${estado.preview})<br>
+      <span style="color:var(--text2);font-size:12px;">Listo para asistirte. Haz clic en cualquier cuenta del balance o escribe tu consulta.</span>
+    </div>`;
+    chatDiv.appendChild(okDiv);
+  }
+
+  // 2. Cargar estructura de cuentas
+  const data = await api('/api/asistente/cuentas');
+  estructuraBalance = data.estructura;
+  renderBalance();
+}
+
+// ── Renderizar el formulario de balance ──
+function renderBalance() {
+  const container = document.getElementById('secciones-balance');
+  if (!container || !estructuraBalance) return;
+
+  const secciones = [
+    { key: 'activo_circulante',   titulo: 'ACTIVO CIRCULANTE',    clase: 'activo' },
+    { key: 'activo_fijo',         titulo: 'ACTIVO FIJO',          clase: 'activo' },
+    { key: 'activo_otros',        titulo: 'OTROS ACTIVOS',        clase: 'activo' },
+    { key: 'pasivo_circulante',   titulo: 'PASIVO CIRCULANTE',    clase: 'pasivo' },
+    { key: 'pasivo_largo_plazo',  titulo: 'PASIVO LARGO PLAZO',   clase: 'pasivo' },
+    { key: 'patrimonio',          titulo: 'PATRIMONIO',           clase: 'patrimonio' },
+  ];
+
+  container.innerHTML = secciones.map(sec => {
+    const cuentas = estructuraBalance[sec.key] || [];
+    const filas = cuentas.map(c => `
+      <div class="cuenta-row">
+        <span class="cuenta-codigo">${c.codigo}</span>
+        <span style="color:var(--text);">${c.nombre}</span>
+        <input class="cuenta-input" type="number" placeholder="$0"
+          id="bal-${c.codigo.replace(/\./g,'-')}"
+          data-codigo="${c.codigo}" data-nombre="${c.nombre}" data-grupo="${c.grupo}"
+          oninput="onBalanceInput(this)"
+          onfocus="pedirAyudaCuenta('${c.codigo}', '${c.nombre.replace(/'/g,"\\'")}', '${c.ayuda.replace(/'/g,"\\'")}', '${sec.clase}')" />
+        <button class="cuenta-ayuda-btn" title="Pedir ayuda" onclick="preguntarSobreCuenta('${c.codigo}', '${c.nombre.replace(/'/g,"\\'")}')">?</button>
+      </div>`).join('');
+
+    return `
+      <div class="balance-seccion">
+        <div class="balance-seccion-header ${sec.clase}" onclick="toggleSeccion('${sec.key}')">
+          <span>${sec.titulo}</span>
+          <span id="subtotal-${sec.key}" style="color:var(--text2);">$0</span>
+        </div>
+        <div id="rows-${sec.key}">${filas}</div>
+        <div class="balance-subtotal">
+          <span>Subtotal ${sec.titulo}</span>
+          <span id="subtotal2-${sec.key}">$0</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleSeccion(key) {
+  const rows = document.getElementById('rows-' + key);
+  if (rows) rows.style.display = rows.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── Al cambiar un valor en el balance ──
+function onBalanceInput(input) {
+  const codigo = input.dataset.codigo;
+  const val = parseFloat(input.value) || 0;
+  valoresBalance[codigo] = val;
+  actualizarTotales();
+}
+
+function actualizarTotales() {
+  const secciones = {
+    activo_circulante: [], activo_fijo: [], activo_otros: [],
+    pasivo_circulante: [], pasivo_largo_plazo: [], patrimonio: []
+  };
+
+  if (!estructuraBalance) return;
+
+  Object.keys(secciones).forEach(key => {
+    const cuentas = estructuraBalance[key] || [];
+    let subtotal = 0;
+    cuentas.forEach(c => {
+      subtotal += valoresBalance[c.codigo] || 0;
+    });
+    secciones[key] = subtotal;
+    const el = document.getElementById('subtotal-' + key);
+    const el2 = document.getElementById('subtotal2-' + key);
+    const fmtd = '$' + Math.round(subtotal).toLocaleString('es-CL');
+    if (el) el.textContent = fmtd;
+    if (el2) el2.textContent = fmtd;
+  });
+
+  const totalActivo = secciones.activo_circulante + secciones.activo_fijo + secciones.activo_otros;
+  const totalPasivo = secciones.pasivo_circulante + secciones.pasivo_largo_plazo;
+  const totalPatrimonio = secciones.patrimonio;
+
+  document.getElementById('total-activo-display').textContent = '$' + Math.round(totalActivo).toLocaleString('es-CL');
+  document.getElementById('total-pasivo-display').textContent = '$' + Math.round(totalPasivo).toLocaleString('es-CL');
+  document.getElementById('total-patrimonio-display').textContent = '$' + Math.round(totalPatrimonio).toLocaleString('es-CL');
+}
+
+function getBalanceActual() {
+  const secciones = {
+    activo_circulante: 0, activo_fijo: 0, activo_otros: 0,
+    pasivo_circulante: 0, pasivo_largo_plazo: 0, patrimonio: 0
+  };
+  if (!estructuraBalance) return { total_activo: 0, total_pasivo: 0, total_patrimonio: 0 };
+  Object.keys(secciones).forEach(key => {
+    (estructuraBalance[key] || []).forEach(c => {
+      secciones[key] += valoresBalance[c.codigo] || 0;
+    });
+  });
+  return {
+    total_activo: secciones.activo_circulante + secciones.activo_fijo + secciones.activo_otros,
+    total_pasivo: secciones.pasivo_circulante + secciones.pasivo_largo_plazo,
+    total_patrimonio: secciones.patrimonio,
+  };
+}
+
+// ── Verificar que el balance cuadra ──
+async function verificarBalance() {
+  const b = getBalanceActual();
+  const diferencia = b.total_activo - (b.total_pasivo + b.total_patrimonio);
+  const estado = document.getElementById('balance-estado');
+  estado.style.display = 'block';
+
+  if (Math.abs(diferencia) < 1) {
+    estado.style.background = 'rgba(34,197,94,.15)';
+    estado.style.color = 'var(--green)';
+    estado.style.border = '1px solid var(--green)';
+    estado.textContent = '✅ El balance CUADRA correctamente. Activo = Pasivo + Patrimonio';
+  } else {
+    estado.style.background = 'rgba(239,68,68,.15)';
+    estado.style.color = 'var(--red)';
+    estado.style.border = '1px solid var(--red)';
+    estado.textContent = `⚠️ El balance NO cuadra. Diferencia: $${Math.round(Math.abs(diferencia)).toLocaleString('es-CL')}. Pide ayuda al asistente →`;
+  }
+
+  // Enviar contexto al asistente
+  const msg = diferencia === 0
+    ? `Verifiqué el balance y cuadra perfectamente. Activo total: $${Math.round(b.total_activo).toLocaleString('es-CL')}. ¿Hay algo que deba revisar igual?`
+    : `Mi balance no cuadra. Tengo: Activo $${Math.round(b.total_activo).toLocaleString('es-CL')}, Pasivo $${Math.round(b.total_pasivo).toLocaleString('es-CL')}, Patrimonio $${Math.round(b.total_patrimonio).toLocaleString('es-CL')}. Diferencia de $${Math.round(Math.abs(diferencia)).toLocaleString('es-CL')}. ¿Cómo lo corrijo?`;
+
+  await enviarMensajeTexto(msg);
+}
+
+// ── Al hacer foco en una cuenta ──
+async function pedirAyudaCuenta(codigo, nombre, ayuda, tipo) {
+  // Solo mostrar ayuda si el campo está vacío (primera vez)
+  const inputId = 'bal-' + codigo.replace(/\./g, '-');
+  const input = document.getElementById(inputId);
+  if (!input || input.dataset.yaExplicado) return;
+  input.dataset.yaExplicado = '1';
+
+  const tipoTexto = tipo === 'pasivo' ? 'pasivo' : tipo === 'patrimonio' ? 'patrimonio' : 'activo';
+  const prompt = `Estoy por ingresar la cuenta "${nombre}" (${codigo}) en mi balance. Es un ${tipoTexto}. ${ayuda}. Dame una explicación breve de cómo funciona esta cuenta para una empresa importadora, si es cargo o abono, y qué debo incluir aquí.`;
+  await enviarMensajeTexto(prompt, true);
+}
+
+function preguntarSobreCuenta(codigo, nombre) {
+  document.getElementById('chat-input').value = `¿Cómo funciona la cuenta "${nombre}" (${codigo}) en una empresa importadora? ¿Qué valores debo ingresar?`;
+  document.getElementById('chat-input').focus();
+}
+
+// ── Sugerencias rápidas ──
+function sugerencia(btn) {
+  document.getElementById('chat-input').value = btn.textContent;
+  enviarMensaje();
+}
+
+// ── Enviar mensaje desde input ──
+async function enviarMensaje() {
+  const input = document.getElementById('chat-input');
+  const texto = input.value.trim();
+  if (!texto) return;
+  input.value = '';
+  await enviarMensajeTexto(texto);
+}
+
+// ── Envío real del mensaje ──
+async function enviarMensajeTexto(texto, silencioso = false) {
+  const chatDiv = document.getElementById('chat-mensajes');
+
+  // Agregar mensaje del usuario (si no es silencioso)
+  if (!silencioso) {
+    historialChat.push({ role: 'user', content: texto });
+    const msgUser = document.createElement('div');
+    msgUser.className = 'msg-user';
+    msgUser.innerHTML = `<div class="msg-bubble msg-bubble-user">${texto.replace(/\n/g,'<br>')}</div>`;
+    chatDiv.appendChild(msgUser);
+  } else {
+    historialChat.push({ role: 'user', content: texto });
+  }
+
+  // Typing indicator
+  const typing = document.createElement('div');
+  typing.className = 'msg-bot';
+  typing.id = 'typing-indicator';
+  typing.innerHTML = `<div class="msg-bubble msg-bubble-bot msg-typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
+  chatDiv.appendChild(typing);
+  chatDiv.scrollTop = chatDiv.scrollHeight;
+
+  // Deshabilitar input
+  document.getElementById('btn-enviar').disabled = true;
+
+  try {
+    const resp = await api('/api/asistente/balance', {
+      method: 'POST',
+      body: JSON.stringify({
+        mensajes: historialChat,
+        balance_actual: getBalanceActual(),
+      }),
+    });
+
+    // Quitar typing
+    typing.remove();
+
+    if (resp.ok && resp.respuesta) {
+      historialChat.push({ role: 'assistant', content: resp.respuesta });
+      const msgBot = document.createElement('div');
+      msgBot.className = 'msg-bot';
+      // Mostrar costo si viene
+      const costoHtml = resp.costo_usd
+        ? `<div style="font-size:10px;color:var(--text2);margin-top:6px;text-align:right;">~$${(resp.costo_usd*1000).toFixed(3)} USD · ${resp.tokens} tokens</div>`
+        : '';
+      msgBot.innerHTML = `<div class="msg-bubble msg-bubble-bot">${formatRespuesta(resp.respuesta)}${costoHtml}</div>`;
+      chatDiv.appendChild(msgBot);
+    } else if (resp.error) {
+      const estiloError = resp.error === 'api_key_missing' || resp.error === 'api_key_invalida'
+        ? 'border-color:var(--yellow);background:rgba(234,179,8,.08);'
+        : resp.error === 'sin_credito'
+        ? 'border-color:var(--red);background:rgba(239,68,68,.08);'
+        : '';
+      const msgErr = document.createElement('div');
+      msgErr.className = 'msg-bot';
+      msgErr.innerHTML = `<div class="msg-bubble msg-bubble-bot" style="${estiloError}">
+        <strong style="color:var(--yellow);">⚠️ ${resp.error === 'api_key_missing' ? 'API key no configurada' : resp.error === 'api_key_invalida' ? 'API key inválida' : resp.error === 'sin_credito' ? 'Sin crédito disponible' : 'Error'}</strong><br>
+        ${resp.mensaje}
+      </div>`;
+      chatDiv.appendChild(msgErr);
+    }
+  } catch (e) {
+    typing.remove();
+    const msgErr = document.createElement('div');
+    msgErr.className = 'msg-bot';
+    msgErr.innerHTML = `<div class="msg-bubble msg-bubble-bot" style="color:var(--red);">Error: ${e.message}</div>`;
+    chatDiv.appendChild(msgErr);
+  }
+
+  document.getElementById('btn-enviar').disabled = false;
+  chatDiv.scrollTop = chatDiv.scrollHeight;
+}
+
+// ── Formatear respuesta del asistente ──
+function formatRespuesta(texto) {
+  return texto
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code style="background:var(--bg3);padding:1px 5px;border-radius:4px;font-size:12px;">$1</code>')
+    .replace(/^### (.*)/gm, '<div style="font-weight:700;margin-top:10px;margin-bottom:4px;color:var(--accent);">$1</div>')
+    .replace(/^## (.*)/gm, '<div style="font-weight:700;margin-top:12px;margin-bottom:6px;font-size:14px;">$1</div>')
+    .replace(/^• (.*)/gm, '<div style="padding-left:14px;margin:2px 0;">• $1</div>')
+    .replace(/⚠️/g, '<span style="color:var(--yellow);">⚠️</span>')
+    .replace(/✅/g, '<span style="color:var(--green);">✅</span>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
+// ── Limpiar balance ──
+function limpiarBalance() {
+  valoresBalance = {};
+  document.querySelectorAll('.cuenta-input').forEach(inp => {
+    inp.value = '';
+    delete inp.dataset.yaExplicado;
+  });
+  actualizarTotales();
+  document.getElementById('balance-estado').style.display = 'none';
+}
+
+init();
+</script>
+</body>
+</html>
