@@ -131,6 +131,9 @@ def detectar_banco(texto: str, nombre: str = "") -> str:
     t, n = texto.lower(), nombre.lower()
     if "global66" in t or "global66" in n or "global 66" in t:
         return "Global66"
+    # Archivos Global66 tienen nombre "extracto_movimientos_start_..."
+    if "extracto_movimientos" in n:
+        return "Global66"
     if "banco de chile" in t or "edwards" in t or "bancochile" in n:
         return "Banco de Chile / Edwards"
     if "santander" in t:
@@ -192,10 +195,181 @@ def clasificar_global66(tipo_banco: str, descripcion: str, es_cargo: bool) -> Op
 
 
 # ─────────────────────────────────────────────
-# Parser Global66 (especializado)
+# Parser Global66 XLSX (formato nuevo)
+# ─────────────────────────────────────────────
+# Global66 exporta archivos con extensión .xls que son XLSX reales (ZIP).
+# Columnas: Tipo de transacción | Fecha | Monto debitado | Monto acreditado
+#           | Costo tipo cambio | ID Fees | Últimos 4 dígitos | Nombre tercero
+#           | DNI | N° cuenta | País | Tipo de cambio | ID transacción | Comentario
+
+MAPA_TIPO_GLOBAL66_XLSX = {
+    "conversión de divisas":        "ingreso_banco",   # abono en cuenta destino
+    "conversion de divisas":        "ingreso_banco",
+    "intereses abonados":           "otro_ingreso",
+    "envío a cuenta bancaria":      "egreso_banco",
+    "envio a cuenta bancaria":      "egreso_banco",
+    "comisión envío":               "egreso_banco",
+    "comision envio":               "egreso_banco",
+    "compra en":                    "egreso_banco",    # prefijo
+}
+
+
+def _clasificar_tipo_global66_xlsx(tipo: str, tiene_debito: bool) -> str:
+    t = tipo.lower().strip()
+    # Envíos a terceros (remuneraciones, proveedores, etc.)
+    if t.startswith("envío a") or t.startswith("envio a"):
+        desc = t
+        if any(p in desc for p in ["segucargo", "flete", "transporte", "logistica", "logística"]):
+            return "egreso_banco"
+        return "egreso_banco"
+    # Recibido de alguien → ingreso
+    if t.startswith("recibido de"):
+        return "ingreso_banco"
+    # Compra con tarjeta
+    if t.startswith("compra en"):
+        return "egreso_banco"
+    # Buscar en mapa exacto
+    for clave, tipo_mov in MAPA_TIPO_GLOBAL66_XLSX.items():
+        if t == clave or t.startswith(clave):
+            return tipo_mov
+    # Fallback por dirección del dinero
+    return "egreso_banco" if tiene_debito else "ingreso_banco"
+
+
+def _parsear_global66_xlsx(archivo_bytes: bytes) -> ResultadoImportacion:
+    """Parser para el XLSX real que exporta Global66 (extensión .xls)."""
+    import zipfile
+    import html as html_mod
+    import re as re_mod
+
+    resultado = ResultadoImportacion()
+    resultado.banco_detectado = "Global66"
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(archivo_bytes))
+        sheet_xml = zf.read('xl/worksheets/sheet1.xml').decode('utf-8')
+    except Exception as e:
+        resultado.errores.append(f"No se pudo abrir el archivo Global66: {e}")
+        return resultado
+
+    # Extraer filas y celdas inline del XML
+    rows = re_mod.findall(r'<row[^>]*>(.*?)</row>', sheet_xml, re_mod.DOTALL)
+    resultado.total_filas_archivo = len(rows)
+
+    # Detectar moneda de la cuenta (fila 0: "Movimientos de cuenta USD/CLP")
+    moneda = "CLP"
+    if rows:
+        primera = re_mod.search(r'<is><t[^>]*>(.*?)</t>', rows[0])
+        if primera and "USD" in primera.group(1).upper():
+            moneda = "USD"
+
+    resultado.advertencias.append(f"Cuenta Global66 en {moneda}")
+
+    def extraer_celdas(row_xml):
+        cells = re_mod.findall(r'<c[^>]*>(.*?)</c>', row_xml, re_mod.DOTALL)
+        valores = []
+        for cell in cells:
+            v = re_mod.search(r'<is><t[^>]*>(.*?)</t>', cell)
+            if not v:
+                v = re_mod.search(r'<v>(.*?)</v>', cell)
+            valores.append(html_mod.unescape(v.group(1)) if v else "")
+        return valores
+
+    # Fila 2 es el encabezado (índice 2)
+    # Columnas fijas del formato Global66 XLSX:
+    # 0: Tipo de transacción
+    # 1: Fecha de la transacción
+    # 2: Monto debitado
+    # 3: Monto acreditado
+    # 4: Costo de tipo de cambio
+    # 5: ID Fees Asociados
+    # 6: Últimos 4 dígitos tarjeta
+    # 7: Nombre tercero o Comercio
+    # 8: DNI del tercero
+    # 9: Número de cuenta del tercero
+    # 10: País destino/tercero
+    # 11: Tipo de cambio
+    # 12: ID de la transacción
+    # 13: Comentario
+
+    enc_idx = None
+    for i, row in enumerate(rows):
+        vals = extraer_celdas(row)
+        if vals and "tipo" in vals[0].lower() and "fecha" in " ".join(vals).lower():
+            enc_idx = i
+            break
+
+    if enc_idx is None:
+        resultado.errores.append(
+            "No se encontró el encabezado en el archivo Global66. "
+            "Descarga desde: Cuenta → Movimientos → Exportar."
+        )
+        return resultado
+
+    for i, row in enumerate(rows[enc_idx + 1:], enc_idx + 2):
+        vals = extraer_celdas(row)
+        if not any(vals):
+            continue
+
+        # Columna fecha (índice 1)
+        fecha_str = vals[1].strip() if len(vals) > 1 else ""
+        fecha = parse_fecha(fecha_str.split(" ")[0] if fecha_str else None)
+        if fecha is None:
+            continue
+
+        tipo_transaccion = vals[0].strip() if len(vals) > 0 else ""
+        monto_debito_str  = vals[2].strip() if len(vals) > 2 else ""
+        monto_credito_str = vals[3].strip() if len(vals) > 3 else ""
+        nombre_tercero    = vals[7].strip() if len(vals) > 7 else ""
+        comentario        = vals[13].strip() if len(vals) > 13 else ""
+        id_transaccion    = vals[12].strip() if len(vals) > 12 else ""
+
+        cargo = parse_monto(monto_debito_str)
+        abono = parse_monto(monto_credito_str)
+
+        if cargo == 0 and abono == 0:
+            continue
+
+        tiene_debito = cargo > 0
+        tipo_mov = _clasificar_tipo_global66_xlsx(tipo_transaccion, tiene_debito)
+
+        # Construir descripción legible
+        if nombre_tercero:
+            descripcion = f"{tipo_transaccion}: {nombre_tercero}"
+        else:
+            descripcion = tipo_transaccion
+        if comentario:
+            descripcion += f" | {comentario}"
+        descripcion = descripcion[:250]
+
+        resultado.filas.append(FilaCartola(
+            fecha=fecha,
+            descripcion=descripcion,
+            cargo=cargo,
+            abono=abono,
+            saldo=None,
+            documento=id_transaccion,
+            tipo_banco=tipo_transaccion,
+            fila_origen=i,
+        ))
+
+    resultado.total_filas_validas = len(resultado.filas)
+    return resultado
+
+
+# ─────────────────────────────────────────────
+# Parser Global66 (especializado - enrutador)
 # ─────────────────────────────────────────────
 
 def parsear_global66(archivo_bytes: bytes, nombre_archivo: str = "") -> ResultadoImportacion:
+    # Global66 puede exportar en dos formatos:
+    # 1. XLSX real con extensión .xls (magic PK = ZIP) — formato nuevo
+    # 2. CSV con separador punto y coma — formato antiguo
+    magic_zip = b'PK\x03\x04'
+    if archivo_bytes[:4] == magic_zip:
+        return _parsear_global66_xlsx(archivo_bytes)
+
+    # --- CSV legacy ---
     resultado = ResultadoImportacion()
     resultado.banco_detectado = "Global66"
 
@@ -394,7 +568,22 @@ def _parsear_csv_banco_chile(archivo_bytes: bytes) -> ResultadoImportacion:
 def parsear_excel(archivo_bytes: bytes, nombre_archivo: str = "") -> ResultadoImportacion:
     resultado = ResultadoImportacion()
 
-    # Caso especial: Banco de Chile exporta CSV con punto y coma con extensión .xls
+    # Caso 1: Global66 exporta XLSX real con extensión .xls
+    nombre_lower = nombre_archivo.lower()
+    magic_zip = b'PK\x03\x04'
+    if archivo_bytes[:4] == magic_zip:
+        if "extracto_movimientos" in nombre_lower or "global66" in nombre_lower:
+            return _parsear_global66_xlsx(archivo_bytes)
+        try:
+            import zipfile
+            zf = zipfile.ZipFile(io.BytesIO(archivo_bytes))
+            sheet = zf.read('xl/worksheets/sheet1.xml').decode('utf-8')
+            if "Movimientos de cuenta" in sheet or "Tipo de transacci" in sheet:
+                return _parsear_global66_xlsx(archivo_bytes)
+        except Exception:
+            pass
+
+    # Caso 2: Banco de Chile exporta CSV con punto y coma con extensión .xls
     if _es_csv_disfrazado(archivo_bytes):
         return _parsear_csv_banco_chile(archivo_bytes)
 
