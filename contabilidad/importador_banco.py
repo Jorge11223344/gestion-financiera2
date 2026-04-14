@@ -814,6 +814,11 @@ def clasificar_movimiento(descripcion: str, es_cargo: bool, tipo_banco: str = ""
 
 
 def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
+    """
+    Convierte las filas parseadas en dicts listos para guardar en MovimientoDiario.
+    Incluye tipo_banco, referencia_externa y es_cargo para que el clasificador
+    del servicio externo pueda usarlos.
+    """
     movimientos = []
     for fila in resultado.filas:
         es_cargo = fila.cargo > 0
@@ -830,7 +835,11 @@ def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
             "tipo": tipo,
             "descripcion": fila.descripcion[:250],
             "monto": monto,
+            "es_cargo": es_cargo,
             "medio_pago": "transferencia",
             "notas": f"Importado desde {resultado.banco_detectado}{nota_tipo}{nota_doc}",
+            # Campos extra para el clasificador y trazabilidad
+            "tipo_banco": fila.tipo_banco,
+            "referencia_externa": fila.documento[:100] if fila.documento else "",
         })
     return movimientos

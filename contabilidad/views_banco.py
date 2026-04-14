@@ -1,47 +1,121 @@
 """
 Vistas para importación de cartola bancaria.
 Flujo:
-  1. POST /api/banco/preview  → sube archivo, devuelve preview sin guardar
-  2. POST /api/banco/confirmar → guarda los movimientos seleccionados
-  3. GET  /api/banco/historial → importaciones anteriores
+  1. GET  /api/cuentas-financieras       → lista cuentas para selector
+  2. POST /api/cuentas-financieras       → crear cuenta nueva
+  3. POST /api/banco/preview             → analiza archivo, devuelve preview
+  4. POST /api/banco/confirmar           → guarda movimientos seleccionados
+  5. GET  /api/banco/importaciones       → historial de importaciones
+  6. POST /api/banco/revertir/<id>       → revierte una importación
+  7. GET  /api/revision/pendientes       → movimientos sin clasificar + sugerencias
+  8. PATCH /api/movimientos/<id>/clasificar → edición manual de clasificación
 """
 
 import json
+import hashlib
+from decimal import Decimal
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.utils import timezone
 
-from .models import MovimientoDiario
-from .importador_banco import (
-    parsear_excel, parsear_csv, convertir_a_movimientos, ResultadoImportacion
-)
+from .models import MovimientoDiario, CuentaFinanciera, RegistroImportacion
+from .importador_banco import parsear_excel, parsear_csv, convertir_a_movimientos
+from .services.clasificador import clasificar_movimiento
+from .services.conciliador import detectar_transferencias_internas, sugerir_emparejamientos
 
+
+# ─────────────────────────────────────────────
+# Cuentas Financieras
+# ─────────────────────────────────────────────
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def cuentas_financieras(request):
+    if request.method == "GET":
+        cuentas = CuentaFinanciera.objects.filter(activa=True)
+        return JsonResponse({"cuentas": [
+            {
+                "id": str(c.pk),
+                "nombre": c.nombre,
+                "institucion": c.institucion,
+                "tipo_cuenta": c.tipo_cuenta,
+                "tipo_cuenta_display": c.get_tipo_cuenta_display(),
+                "moneda": c.moneda,
+                "moneda_display": c.get_moneda_display(),
+                "titular": c.titular,
+                "numero_parcial": c.numero_parcial,
+                "saldo_inicial": float(c.saldo_inicial),
+            }
+            for c in cuentas
+        ]})
+
+    # POST — crear cuenta
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "JSON inválido"}, status=400)
+
+    try:
+        cuenta = CuentaFinanciera.objects.create(
+            nombre=body.get("nombre", "").strip(),
+            institucion=body.get("institucion", "").strip(),
+            tipo_cuenta=body.get("tipo_cuenta", "cuenta_corriente"),
+            moneda=body.get("moneda", "CLP"),
+            titular=body.get("titular", ""),
+            numero_parcial=body.get("numero_parcial", ""),
+            saldo_inicial=Decimal(str(body.get("saldo_inicial", 0))),
+            fecha_saldo_inicial=body.get("fecha_saldo_inicial") or None,
+            notas=body.get("notas", ""),
+        )
+        return JsonResponse({"id": str(cuenta.pk), "nombre": cuenta.nombre}, status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def cuenta_financiera_detalle(request, cuenta_id):
+    try:
+        cuenta = CuentaFinanciera.objects.get(pk=cuenta_id)
+        cuenta.activa = False
+        cuenta.save(update_fields=['activa'])
+        return JsonResponse({"ok": True})
+    except CuentaFinanciera.DoesNotExist:
+        return JsonResponse({"error": "No encontrada"}, status=404)
+
+
+# ─────────────────────────────────────────────
+# Preview de Cartola
+# ─────────────────────────────────────────────
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def preview_cartola(request):
-    """
-    Recibe el archivo Excel/CSV, lo parsea y devuelve preview
-    sin guardar nada en la base de datos.
-    """
     if "archivo" not in request.FILES:
         return JsonResponse({"error": "No se recibió ningún archivo"}, status=400)
 
     archivo = request.FILES["archivo"]
-    nombre = archivo.name.lower()
+    nombre = archivo.name
     contenido = archivo.read()
 
-    # Parsear según extensión
-    if nombre.endswith((".xlsx", ".xls")):
+    # Verificar si ya fue importado (hash SHA256)
+    hash_archivo = hashlib.sha256(contenido).hexdigest()
+    if RegistroImportacion.objects.filter(hash_archivo=hash_archivo).exists():
+        reg = RegistroImportacion.objects.get(hash_archivo=hash_archivo)
+        return JsonResponse({
+            "error": f"Este archivo ya fue importado el {reg.fecha_importacion.strftime('%d/%m/%Y %H:%M')}. "
+                     f"Se importaron {reg.total_importados} movimientos.",
+            "ya_importado": True,
+        }, status=409)
+
+    nombre_lower = nombre.lower()
+    if nombre_lower.endswith((".xlsx", ".xls")):
         resultado = parsear_excel(contenido, nombre)
-    elif nombre.endswith(".csv"):
-        resultado = parsear_csv(contenido)
+    elif nombre_lower.endswith(".csv"):
+        resultado = parsear_csv(contenido, nombre)
     else:
-        return JsonResponse(
-            {"error": "Formato no soportado. Usa .xlsx o .csv"},
-            status=400
-        )
+        return JsonResponse({"error": "Formato no soportado. Usa .xlsx, .xls o .csv"}, status=400)
 
     if resultado.errores:
         return JsonResponse({
@@ -49,31 +123,65 @@ def preview_cartola(request):
             "todos_errores": resultado.errores,
         }, status=422)
 
-    # Convertir a formato de movimientos
     movimientos_propuestos = convertir_a_movimientos(resultado)
 
-    # Detectar posibles duplicados (misma fecha + monto + tipo ya existe)
+    # Obtener cuenta financiera si se envió
+    cuenta_id = request.POST.get("cuenta_financiera_id", "")
+    cuenta = None
+    moneda_cuenta = "CLP"
+    if cuenta_id:
+        try:
+            cuenta = CuentaFinanciera.objects.get(pk=cuenta_id)
+            moneda_cuenta = cuenta.moneda
+        except CuentaFinanciera.DoesNotExist:
+            pass
+
+    # Clasificar y detectar duplicados
     for mov in movimientos_propuestos:
+        # Clasificación automática
+        clasificacion = clasificar_movimiento(
+            descripcion=mov.get("descripcion", ""),
+            tipo_banco=mov.get("tipo_banco", ""),
+            es_cargo=mov.get("es_cargo", False),
+            institucion=cuenta.institucion if cuenta else resultado.banco_detectado,
+            moneda=moneda_cuenta,
+        )
+        mov["categoria_normalizada"] = clasificacion["categoria_normalizada"]
+        mov["es_transferencia_interna"] = clasificacion["es_transferencia_interna"]
+        mov["clasificacion_confianza"] = clasificacion["confianza"]
+        mov["clasificacion_razon"] = clasificacion["razon"]
+        mov["tercero"] = clasificacion.get("tercero", "")
+
+        # Detección de duplicados por hash: fecha + monto + referencia
+        ref = mov.get("referencia_externa", "")
         existe = MovimientoDiario.objects.filter(
             fecha=mov["fecha"],
             monto=mov["monto"],
             medio_pago="transferencia",
-        ).exists()
-        mov["posible_duplicado"] = existe
+        )
+        if ref:
+            existe = existe.filter(referencia_externa=ref)
+        mov["posible_duplicado"] = existe.exists()
         mov["fecha"] = str(mov["fecha"])
-        mov["monto"] = int(mov["monto"])
+        mov["monto"] = float(mov["monto"])
 
     # Estadísticas del preview
-    total_ingresos = sum(m["monto"] for m in movimientos_propuestos if m["tipo"] in [
-        "ingreso_banco", "ingreso_caja", "otro_ingreso"
-    ])
-    total_egresos = sum(m["monto"] for m in movimientos_propuestos if m["tipo"] not in [
-        "ingreso_banco", "ingreso_caja", "otro_ingreso"
-    ])
+    movs_reales = [m for m in movimientos_propuestos if not m.get("es_transferencia_interna")]
+    total_ingresos = sum(
+        m["monto"] for m in movs_reales
+        if m["tipo"] in ["ingreso_banco", "ingreso_caja", "otro_ingreso", "prestamo_recibido"]
+    )
+    total_egresos = sum(
+        m["monto"] for m in movs_reales
+        if m["tipo"] not in ["ingreso_banco", "ingreso_caja", "otro_ingreso", "prestamo_recibido"]
+    )
     duplicados = sum(1 for m in movimientos_propuestos if m["posible_duplicado"])
+    transferencias_internas = sum(1 for m in movimientos_propuestos if m.get("es_transferencia_interna"))
 
     return JsonResponse({
         "banco_detectado": resultado.banco_detectado,
+        "hash_archivo": hash_archivo,
+        "moneda_cuenta": moneda_cuenta,
         "total_filas_archivo": resultado.total_filas_archivo,
         "total_filas_validas": resultado.total_filas_validas,
         "advertencias": resultado.advertencias,
@@ -83,17 +191,18 @@ def preview_cartola(request):
             "total_egresos": total_egresos,
             "resultado": total_ingresos - total_egresos,
             "posibles_duplicados": duplicados,
+            "transferencias_internas": transferencias_internas,
         }
     })
 
 
+# ─────────────────────────────────────────────
+# Confirmar Importación
+# ─────────────────────────────────────────────
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def confirmar_importacion(request):
-    """
-    Recibe la lista de movimientos confirmados por el usuario y los guarda.
-    El frontend puede excluir algunos (duplicados o incorrectos).
-    """
     try:
         body = json.loads(request.body)
     except json.JSONDecodeError:
@@ -103,36 +212,251 @@ def confirmar_importacion(request):
     if not movimientos:
         return JsonResponse({"error": "No hay movimientos para importar"}, status=400)
 
+    cuenta_id = body.get("cuenta_financiera_id", "")
+    hash_archivo = body.get("hash_archivo", "")
+    nombre_archivo = body.get("nombre_archivo", "archivo")
+    banco_detectado = body.get("banco_detectado", "")
+    advertencias = body.get("advertencias", [])
+
+    cuenta = None
+    moneda_cuenta = "CLP"
+    if cuenta_id:
+        try:
+            cuenta = CuentaFinanciera.objects.get(pk=cuenta_id)
+            moneda_cuenta = cuenta.moneda
+        except CuentaFinanciera.DoesNotExist:
+            pass
+
+    # Crear registro de importación
+    registro = None
+    if hash_archivo:
+        try:
+            registro = RegistroImportacion.objects.create(
+                cuenta_financiera=cuenta,
+                nombre_archivo=nombre_archivo,
+                banco_detectado=banco_detectado,
+                total_filas_archivo=body.get("total_filas_archivo", 0),
+                hash_archivo=hash_archivo,
+                advertencias=advertencias,
+            )
+        except Exception:
+            pass  # Si ya existe el hash, continuar sin registro
+
     creados = 0
+    duplicados = 0
     errores = []
 
     for mov in movimientos:
         if not mov.get("incluir", True):
-            continue  # el usuario lo excluyó
+            duplicados += 1
+            continue
 
         try:
-            from decimal import Decimal
-            MovimientoDiario.objects.create(
+            monto = Decimal(str(mov["monto"]))
+            moneda_mov = moneda_cuenta
+
+            # Si el monto original viene en moneda extranjera
+            monto_clp = monto
+            monto_orig = None
+            tipo_cambio = None
+            if moneda_cuenta == "USD" and mov.get("tipo_cambio"):
+                tipo_cambio = Decimal(str(mov["tipo_cambio"]))
+                monto_orig = monto
+                monto_clp = monto * tipo_cambio
+
+            obj = MovimientoDiario.objects.create(
                 fecha=mov["fecha"],
                 tipo=mov["tipo"],
                 descripcion=mov["descripcion"][:250],
-                monto=Decimal(str(mov["monto"])),
+                monto=monto_clp,
                 medio_pago=mov.get("medio_pago", "transferencia"),
                 notas=mov.get("notas", ""),
+                # Campos nuevos
+                cuenta_financiera=cuenta,
+                moneda=moneda_mov,
+                monto_moneda_orig=monto_orig,
+                tipo_cambio=tipo_cambio,
+                importacion=registro,
+                referencia_externa=mov.get("referencia_externa", "")[:100],
+                es_transferencia_interna=mov.get("es_transferencia_interna", False),
+                categoria_normalizada=mov.get("categoria_normalizada", "sin_clasificar"),
+                tercero=mov.get("tercero", "")[:200],
+                clasificacion_confianza=mov.get("clasificacion_confianza", ""),
+                clasificacion_razon=mov.get("clasificacion_razon", "")[:250],
             )
             creados += 1
         except Exception as e:
-            errores.append(f"Fila {mov.get('descripcion','?')}: {str(e)}")
+            errores.append(f"{mov.get('descripcion', '?')[:50]}: {str(e)}")
+
+    # Actualizar registro
+    if registro:
+        registro.total_importados = creados
+        registro.total_duplicados = duplicados
+        registro.total_errores = len(errores)
+        registro.estado = 'completado' if not errores else 'con_errores'
+        registro.save(update_fields=['total_importados', 'total_duplicados', 'total_errores', 'estado'])
+
+    # Ejecutar conciliación automática en background
+    try:
+        detectar_transferencias_internas()
+    except Exception:
+        pass
 
     return JsonResponse({
         "mensaje": f"✅ {creados} movimientos importados correctamente",
         "creados": creados,
+        "duplicados": duplicados,
         "errores": errores,
+        "importacion_id": str(registro.pk) if registro else None,
     }, status=201)
 
 
+# ─────────────────────────────────────────────
+# Historial de Importaciones
+# ─────────────────────────────────────────────
+
 @require_http_methods(["GET"])
-def tipos_para_selector(_request):
-    """Devuelve los tipos de movimiento para el selector del preview."""
+def historial_importaciones(request):
+    registros = RegistroImportacion.objects.select_related('cuenta_financiera')[:50]
+    return JsonResponse({"importaciones": [
+        {
+            "id": str(r.pk),
+            "nombre_archivo": r.nombre_archivo,
+            "banco_detectado": r.banco_detectado,
+            "cuenta": str(r.cuenta_financiera) if r.cuenta_financiera else "—",
+            "fecha": r.fecha_importacion.strftime('%d/%m/%Y %H:%M'),
+            "total_importados": r.total_importados,
+            "estado": r.estado,
+        }
+        for r in registros
+    ]})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def revertir_importacion(request, importacion_id):
+    """Elimina todos los movimientos de una importación y la marca como revertida."""
+    try:
+        registro = RegistroImportacion.objects.get(pk=importacion_id)
+    except RegistroImportacion.DoesNotExist:
+        return JsonResponse({"error": "Importación no encontrada"}, status=404)
+
+    eliminados = MovimientoDiario.objects.filter(importacion=registro).delete()[0]
+    registro.estado = 'revertido'
+    registro.save(update_fields=['estado'])
+
+    return JsonResponse({
+        "mensaje": f"✅ Importación revertida. {eliminados} movimientos eliminados.",
+        "eliminados": eliminados,
+    })
+
+
+# ─────────────────────────────────────────────
+# Panel de Revisión Manual
+# ─────────────────────────────────────────────
+
+@require_http_methods(["GET"])
+def revision_pendientes(request):
+    """
+    Retorna movimientos que requieren revisión manual:
+    - Sin clasificar
+    - Posibles transferencias internas no vinculadas
+    - Posibles duplicados
+    """
+    sin_clasificar = MovimientoDiario.objects.filter(
+        categoria_normalizada='sin_clasificar'
+    ).order_by('-fecha')[:50]
+
+    posibles_transferencias = sugerir_emparejamientos()[:20]
+
+    # Posibles duplicados: mismo monto y fecha, más de una vez
+    from django.db.models import Count
+    from django.db.models.functions import TruncDate
+    posibles_dup = (
+        MovimientoDiario.objects
+        .values('fecha', 'monto', 'medio_pago')
+        .annotate(n=Count('id'))
+        .filter(n__gt=1)
+        .order_by('-fecha')[:20]
+    )
+
+    return JsonResponse({
+        "sin_clasificar": [
+            {
+                "id": str(m.pk),
+                "fecha": str(m.fecha),
+                "descripcion": m.descripcion,
+                "monto": float(m.monto),
+                "tipo": m.tipo,
+                "cuenta": str(m.cuenta_financiera) if m.cuenta_financiera else "—",
+                "moneda": m.moneda,
+            }
+            for m in sin_clasificar
+        ],
+        "posibles_transferencias": posibles_transferencias,
+        "posibles_duplicados": [
+            {
+                "fecha": str(d['fecha']),
+                "monto": float(d['monto']),
+                "cantidad": d['n'],
+            }
+            for d in posibles_dup
+        ],
+        "totales": {
+            "sin_clasificar": MovimientoDiario.objects.filter(categoria_normalizada='sin_clasificar').count(),
+            "transferencias_sin_vincular": MovimientoDiario.objects.filter(
+                categoria_normalizada__in=['transferencia_interna', 'conversion_divisa'],
+                movimiento_relacionado__isnull=True
+            ).count(),
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def clasificar_movimiento_view(request, mov_id):
+    """Permite editar manualmente la clasificación de un movimiento."""
+    try:
+        mov = MovimientoDiario.objects.get(pk=mov_id)
+    except MovimientoDiario.DoesNotExist:
+        return JsonResponse({"error": "Movimiento no encontrado"}, status=404)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "JSON inválido"}, status=400)
+
+    campos_editables = [
+        'categoria_normalizada', 'es_transferencia_interna',
+        'tercero', 'pais_tercero', 'notas',
+    ]
+    for campo in campos_editables:
+        if campo in body:
+            setattr(mov, campo, body[campo])
+
+    # Vincular movimiento relacionado
+    rel_id = body.get("movimiento_relacionado_id")
+    if rel_id:
+        try:
+            rel = MovimientoDiario.objects.get(pk=rel_id)
+            mov.movimiento_relacionado = rel
+            rel.movimiento_relacionado = mov
+            rel.es_transferencia_interna = True
+            rel.save(update_fields=['movimiento_relacionado', 'es_transferencia_interna'])
+        except MovimientoDiario.DoesNotExist:
+            pass
+    elif "movimiento_relacionado_id" in body and rel_id is None:
+        mov.movimiento_relacionado = None
+
+    mov.clasificacion_razon = "Clasificado manualmente"
+    mov.clasificacion_confianza = "alta"
+    mov.save()
+
+    return JsonResponse({"ok": True, "mensaje": "Clasificación actualizada"})
+
+
+@require_http_methods(["GET"])
+def tipos_para_selector(request):
     tipos = [{"value": k, "label": v} for k, v in MovimientoDiario.TIPOS]
-    return JsonResponse({"tipos": tipos})
+    categorias = [{"value": k, "label": v} for k, v in MovimientoDiario.CATEGORIAS_NORM]
+    return JsonResponse({"tipos": tipos, "categorias": categorias})

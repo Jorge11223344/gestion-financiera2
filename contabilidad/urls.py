@@ -28,11 +28,21 @@ urlpatterns = [
     path('api/tipos', views.tipos_movimiento, name='tipos'),
     path('api/calcular-iva', views.calcular_iva_view, name='calcular_iva'),
 
+    # Cuentas financieras
+    path('api/cuentas-financieras', views_banco.cuentas_financieras, name='cuentas_financieras'),
+    path('api/cuentas-financieras/<str:cuenta_id>', views_banco.cuenta_financiera_detalle, name='cuenta_financiera_detalle'),
+
     # Importación cartola bancaria
     path('api/banco/preview', views_banco.preview_cartola, name='banco_preview'),
     path('api/banco/confirmar', views_banco.confirmar_importacion, name='banco_confirmar'),
+    path('api/banco/importaciones', views_banco.historial_importaciones, name='banco_importaciones'),
+    path('api/banco/revertir/<str:importacion_id>', views_banco.revertir_importacion, name='banco_revertir'),
 
-    # Asistente contable de balance
+    # Revisión manual
+    path('api/revision/pendientes', views_banco.revision_pendientes, name='revision_pendientes'),
+    path('api/movimientos/<str:mov_id>/clasificar', views_banco.clasificar_movimiento_view, name='clasificar_movimiento'),
+
+    # Asistente contable
     path('api/asistente/balance', views_asistente.asistente_balance, name='asistente_balance'),
     path('api/asistente/cuentas', views_asistente.cuentas_balance, name='cuentas_balance'),
     path('api/asistente/estado', views_asistente.estado_api, name='asistente_estado'),

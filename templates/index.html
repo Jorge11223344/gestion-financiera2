@@ -241,6 +241,8 @@
   <div class="nav-item" onclick="navTo('nuevo-movimiento')"><span class="icon">➕</span> Nuevo Movimiento</div>
   <div class="nav-item" onclick="navTo('importar-banco')"><span class="icon">🏦</span> Importar Cartola</div>
   <div class="nav-item" onclick="navTo('movimientos')"><span class="icon">📋</span> Historial</div>
+  <div class="nav-item" onclick="navTo('cuentas-financieras')"><span class="icon">🏦</span> Cuentas</div>
+  <div class="nav-item" onclick="navTo('revision')"><span class="icon">🔍</span> Revisar</div>
   <div class="nav-item" onclick="navTo('cierre-diario')"><span class="icon">🔒</span> Cierre del Día</div>
   <div class="nav-section">Análisis</div>
   <div class="nav-item" onclick="navTo('asistente-balance')"><span class="icon">🤖</span> Asistente Contable</div>
@@ -557,12 +559,26 @@
     <p>Sube el Excel que descargaste desde la web de tu banco</p>
   </div>
   <div id="import-paso1">
-    <div class="card" style="max-width:600px;">
-      <div style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.8;background:var(--bg3);padding:16px;border-radius:8px;">
+    <div class="card" style="max-width:640px;">
+      <!-- Selector de cuenta financiera -->
+      <div style="margin-bottom:20px;">
+        <label style="font-size:12px;color:var(--text2);font-weight:600;display:block;margin-bottom:8px;">
+          CUENTA FINANCIERA *
+        </label>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <select id="selector-cuenta" style="flex:1;padding:10px 12px;font-size:14px;" onchange="onCuentaChange()">
+            <option value="">⚠️ Selecciona la cuenta antes de importar...</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="modalNuevaCuenta()" title="Agregar cuenta nueva">+ Nueva</button>
+        </div>
+        <div id="cuenta-info" style="display:none;margin-top:8px;font-size:12px;color:var(--text2);padding:8px;background:var(--bg3);border-radius:6px;"></div>
+      </div>
+
+      <div style="font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;">
         <strong style="color:var(--text);">Descargar desde tu banco:</strong><br>
         <strong>Banco de Chile:</strong> Empresas &rarr; Cuenta Corriente &rarr; Cartola &rarr; Exportar Excel<br>
-        <strong>Global66:</strong> Cuenta &rarr; Movimientos &rarr; Descargar CSV (el archivo .csv con punto y coma)<br>
-        <span style="color:var(--text2);font-size:12px;">Tambien compatible con Santander, BCI, Scotiabank. El banco se detecta automaticamente.</span>
+        <strong>Global66:</strong> Cuenta &rarr; Movimientos &rarr; Exportar (archivo .xls)<br>
+        <span style="font-size:11px;">Compatible con Santander, BCI, Scotiabank. El banco se detecta automáticamente.</span>
       </div>
       <div id="dropzone"
         style="border:2px dashed var(--border);border-radius:12px;padding:48px;text-align:center;cursor:pointer;transition:all .2s;"
@@ -571,7 +587,7 @@
         ondragleave="this.style.borderColor='var(--border)'"
         ondrop="onDrop(event)">
         <div style="font-size:40px;margin-bottom:10px;">&#128194;</div>
-        <div style="font-weight:600;font-size:15px;margin-bottom:4px;">Arrastra tu archivo aqui</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:4px;">Arrastra tu archivo aquí</div>
         <div style="font-size:13px;color:var(--text2);">o haz clic para seleccionar</div>
         <div style="font-size:12px;color:var(--text2);margin-top:8px;">Formatos: .xlsx .xls .csv</div>
       </div>
@@ -604,10 +620,10 @@
             <tr>
               <th style="width:36px;"></th>
               <th>Fecha</th>
-              <th>Descripcion del banco</th>
-              <th>Tipo</th>
+              <th>Descripción</th>
+              <th>Categoría detectada</th>
               <th>Monto</th>
-              <th>Aviso</th>
+              <th>Estado</th>
             </tr>
           </thead>
           <tbody id="tabla-preview"></tbody>
@@ -797,7 +813,154 @@
 </main>
 </div>
 
+<!-- CUENTAS FINANCIERAS -->
+<div id="page-cuentas-financieras" class="page">
+  <div class="page-header">
+    <h1>Cuentas Financieras</h1>
+    <p>Tus cuentas bancarias y billeteras digitales</p>
+  </div>
+  <div style="margin-bottom:20px;">
+    <button class="btn btn-primary" onclick="modalNuevaCuenta()">➕ Nueva Cuenta</button>
+  </div>
+  <div class="grid-3" id="grid-cuentas">
+    <div class="loading">Cargando cuentas...</div>
+  </div>
+</div>
+
+<!-- REVISIÓN MANUAL -->
+<div id="page-revision" class="page">
+  <div class="page-header">
+    <h1>Revisión de Movimientos</h1>
+    <p>Movimientos sin clasificar, posibles transferencias internas y duplicados</p>
+  </div>
+
+  <!-- Tabs -->
+  <div style="display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;">
+    <button class="revision-tab active" onclick="switchRevisionTab('sin-clasificar', this)" style="padding:10px 18px;background:none;border:none;color:var(--accent);font-size:14px;font-weight:600;border-bottom:2px solid var(--accent);cursor:pointer;">Sin clasificar <span id="badge-sin-clasificar" style="background:var(--red);color:#fff;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
+    <button class="revision-tab" onclick="switchRevisionTab('transferencias', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles transferencias internas <span id="badge-transferencias" style="background:var(--yellow);color:#000;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
+    <button class="revision-tab" onclick="switchRevisionTab('duplicados', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles duplicados</button>
+  </div>
+
+  <div id="revision-sin-clasificar">
+    <div class="card">
+      <div class="tabla-wrapper">
+        <table>
+          <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead>
+          <tbody id="tabla-sin-clasificar"><tr><td colspan="5" class="loading">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="revision-transferencias" style="display:none;">
+    <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+      El sistema detectó estos pares de movimientos que podrían ser transferencias internas entre tus cuentas. Revisa y confirma.
+    </div>
+    <div id="lista-transferencias"><div class="loading">Cargando...</div></div>
+  </div>
+
+  <div id="revision-duplicados" style="display:none;">
+    <div class="card">
+      <div class="tabla-wrapper">
+        <table>
+          <thead><tr><th>Fecha</th><th>Monto</th><th>Cantidad de registros</th></tr></thead>
+          <tbody id="tabla-duplicados"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Nueva Cuenta -->
+<div class="modal-overlay" id="modal-nueva-cuenta">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Nueva Cuenta Financiera</span>
+      <button class="modal-close" onclick="closeModal('modal-nueva-cuenta')">✕</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Nombre de la cuenta *</label>
+        <input type="text" id="nc-nombre" placeholder='Ej: "Global66 CLP", "Banco de Chile CC"' />
+      </div>
+      <div class="form-group">
+        <label>Institución *</label>
+        <input type="text" id="nc-institucion" placeholder='Ej: "Global66", "Banco de Chile"' />
+      </div>
+      <div class="form-group">
+        <label>Moneda *</label>
+        <select id="nc-moneda">
+          <option value="CLP">Peso Chileno (CLP)</option>
+          <option value="USD">Dólar Americano (USD)</option>
+          <option value="EUR">Euro (EUR)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tipo de cuenta</label>
+        <select id="nc-tipo">
+          <option value="cuenta_corriente">Cuenta Corriente</option>
+          <option value="cuenta_vista">Cuenta Vista / RUT</option>
+          <option value="billetera_digital">Billetera Digital</option>
+          <option value="caja">Caja (Efectivo)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Titular</label>
+        <input type="text" id="nc-titular" placeholder="Nombre o razón social" />
+      </div>
+      <div class="form-group">
+        <label>Últimos 4 dígitos</label>
+        <input type="text" id="nc-numero" placeholder="1234" maxlength="10" />
+      </div>
+      <div class="form-group">
+        <label>Saldo inicial ($)</label>
+        <input type="number" id="nc-saldo" value="0" />
+      </div>
+      <div class="form-group">
+        <label>Fecha saldo inicial</label>
+        <input type="date" id="nc-fecha-saldo" />
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarNuevaCuenta()">💾 Guardar Cuenta</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-nueva-cuenta')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Clasificar Movimiento -->
+<div class="modal-overlay" id="modal-clasificar">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Clasificar Movimiento</span>
+      <button class="modal-close" onclick="closeModal('modal-clasificar')">✕</button>
+    </div>
+    <div id="modal-clasificar-desc" style="font-size:13px;color:var(--text2);margin-bottom:16px;padding:10px;background:var(--bg3);border-radius:6px;"></div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Categoría</label>
+        <select id="mc-categoria"></select>
+      </div>
+      <div class="form-group full">
+        <label>Tercero (proveedor, cliente, persona)</label>
+        <input type="text" id="mc-tercero" placeholder="Nombre del tercero" />
+      </div>
+      <div class="form-group full">
+        <label>
+          <input type="checkbox" id="mc-interna" style="width:auto;margin-right:6px;" />
+          Es transferencia interna (no afecta el resultado)
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarClasificacion()">💾 Guardar</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-clasificar')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Eliminar -->
+
 <div class="modal-overlay" id="modal-eliminar">
   <div class="modal" style="max-width:400px;">
     <div class="modal-header">
@@ -930,7 +1093,9 @@ function navTo(page) {
   if (page === 'presupuesto') cargarPresupuesto();
   if (page === 'configuracion') cargarConfiguracion();
   if (page === 'nuevo-movimiento') initFormMovimiento();
-  if (page === 'importar-banco') cargarTiposParaImport();
+  if (page === 'importar-banco') { cargarTiposParaImport(); cargarCuentasFinancieras(); }
+  if (page === 'cuentas-financieras') cargarGridCuentas();
+  if (page === 'revision') cargarRevision();
   if (page === 'asistente-balance') initAsistente();
 }
 
@@ -1415,6 +1580,97 @@ async function init() {
 
   // Cargar dashboard inicial
   cargarDashboard();
+  // Cargar cuentas para selector de importación
+  cargarCuentasFinancieras();
+}
+
+// ─────────────────────────────────────────────────────────
+// Cuentas Financieras
+// ─────────────────────────────────────────────────────────
+let cuentasFinancieras = [];
+let categoriasMov = [];
+
+async function cargarCuentasFinancieras() {
+  const data = await api('/api/cuentas-financieras');
+  cuentasFinancieras = data.cuentas;
+  actualizarSelectorCuentas();
+}
+
+function actualizarSelectorCuentas() {
+  const sel = document.getElementById('selector-cuenta');
+  if (!sel) return;
+  const valActual = sel.value;
+  sel.innerHTML = '<option value="">⚠️ Selecciona la cuenta antes de importar...</option>';
+  cuentasFinancieras.forEach(c => {
+    sel.innerHTML += `<option value="${c.id}">${c.nombre} — ${c.moneda} | ${c.institucion}</option>`;
+  });
+  if (valActual) sel.value = valActual;
+}
+
+function onCuentaChange() {
+  const sel = document.getElementById('selector-cuenta');
+  const cuentaId = sel.value;
+  const infoDiv = document.getElementById('cuenta-info');
+  if (!cuentaId) { infoDiv.style.display='none'; return; }
+  const c = cuentasFinancieras.find(x => x.id === cuentaId);
+  if (c) {
+    infoDiv.style.display = 'block';
+    infoDiv.innerHTML = `🏦 ${c.institucion} · ${c.tipo_cuenta_display} · Moneda: <strong>${c.moneda}</strong>`;
+  }
+  // Habilitar botón si hay archivo
+  if (archivoCartola) document.getElementById('btn-previsualizar').disabled = false;
+}
+
+async function cargarGridCuentas() {
+  await cargarCuentasFinancieras();
+  const grid = document.getElementById('grid-cuentas');
+  if (!grid) return;
+  if (!cuentasFinancieras.length) {
+    grid.innerHTML = '<div class="card empty">No hay cuentas configuradas. Haz clic en "+ Nueva Cuenta" para agregar.</div>';
+    return;
+  }
+  const colores = { CLP: 'var(--green)', USD: 'var(--blue)', EUR: 'var(--yellow)' };
+  grid.innerHTML = cuentasFinancieras.map(c => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${c.nombre}</div>
+          <div style="font-size:12px;color:var(--text2);">${c.institucion}</div>
+        </div>
+        <span style="background:rgba(99,102,241,.15);color:${colores[c.moneda]||'var(--accent)'};padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;">${c.moneda}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);">
+        ${c.tipo_cuenta_display}${c.numero_parcial ? ' · ****'+c.numero_parcial : ''}
+      </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;">
+        Saldo inicial: <strong>$${c.saldo_inicial.toLocaleString('es-CL')}</strong>
+      </div>
+    </div>
+  `).join('');
+}
+
+function modalNuevaCuenta() {
+  document.getElementById('modal-nueva-cuenta').classList.add('show');
+}
+
+async function guardarNuevaCuenta() {
+  const body = {
+    nombre: document.getElementById('nc-nombre').value.trim(),
+    institucion: document.getElementById('nc-institucion').value.trim(),
+    moneda: document.getElementById('nc-moneda').value,
+    tipo_cuenta: document.getElementById('nc-tipo').value,
+    titular: document.getElementById('nc-titular').value,
+    numero_parcial: document.getElementById('nc-numero').value,
+    saldo_inicial: parseFloat(document.getElementById('nc-saldo').value) || 0,
+    fecha_saldo_inicial: document.getElementById('nc-fecha-saldo').value || null,
+  };
+  if (!body.nombre || !body.institucion) { showToast('Nombre e institución son obligatorios', 'error'); return; }
+  const data = await api('/api/cuentas-financieras', { method: 'POST', body: JSON.stringify(body) });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  closeModal('modal-nueva-cuenta');
+  showToast('✅ Cuenta creada correctamente');
+  await cargarCuentasFinancieras();
+  if (document.getElementById('grid-cuentas')) cargarGridCuentas();
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1423,11 +1679,17 @@ async function init() {
 let archivoCartola = null;
 let movimientosPreview = [];
 let tiposDisponibles = [];
+let previewData = {};  // datos del último preview
 
-// Cargar tipos disponibles para el selector
 async function cargarTiposParaImport() {
   const data = await api('/api/tipos');
-  tiposDisponibles = data.tipos;
+  tiposDisponibles = data.tipos || [];
+  categoriasMov = data.categorias || [];
+  // Poblar selector del modal de clasificación
+  const selCat = document.getElementById('mc-categoria');
+  if (selCat && categoriasMov.length) {
+    selCat.innerHTML = categoriasMov.map(c => `<option value="${c.value}">${c.label}</option>`).join('');
+  }
 }
 
 function onArchivoSeleccionado() {
@@ -1448,12 +1710,16 @@ function setArchivo(file) {
   document.getElementById('archivo-nombre').textContent = file.name;
   document.getElementById('archivo-tam').textContent = kb + ' KB';
   document.getElementById('archivo-info').style.display = 'block';
-  document.getElementById('btn-previsualizar').disabled = false;
+  // Solo habilitar si hay cuenta seleccionada
+  const cuentaId = document.getElementById('selector-cuenta')?.value;
+  document.getElementById('btn-previsualizar').disabled = !cuentaId;
   document.getElementById('dropzone').style.borderColor = 'var(--accent)';
 }
 
 async function previsualizarCartola() {
   if (!archivoCartola) return;
+  const cuentaId = document.getElementById('selector-cuenta')?.value || '';
+  if (!cuentaId) { showToast('Selecciona una cuenta financiera primero', 'error'); return; }
 
   const btn = document.getElementById('btn-previsualizar');
   btn.disabled = true;
@@ -1461,6 +1727,7 @@ async function previsualizarCartola() {
 
   const form = new FormData();
   form.append('archivo', archivoCartola);
+  form.append('cuenta_financiera_id', cuentaId);
 
   try {
     const resp = await fetch('/api/banco/preview', {
@@ -1471,41 +1738,64 @@ async function previsualizarCartola() {
     const data = await resp.json();
 
     if (data.error) {
-      showToast(data.error, 'error');
+      if (data.ya_importado) {
+        showToast(data.error, 'error');
+      } else {
+        showToast(data.error, 'error');
+      }
       btn.disabled = false;
       btn.textContent = 'Analizar Archivo';
       return;
     }
 
-    movimientosPreview = data.movimientos.map(m => ({ ...m, incluir: !m.posible_duplicado }));
+    previewData = data;
+    movimientosPreview = data.movimientos.map(m => ({
+      ...m,
+      incluir: !m.posible_duplicado && !m.es_transferencia_interna,
+    }));
 
-    // Resumen del análisis
     const s = data.estadisticas;
     const advertencias = data.advertencias.map(a => `<li style="color:var(--yellow);">${a}</li>`).join('');
+    const cuenta = cuentasFinancieras.find(c => c.id === cuentaId);
     document.getElementById('import-resumen').innerHTML = `
       <div class="grid-4">
-        <div class="card"><div class="stat-label">Banco detectado</div><div style="font-size:16px;font-weight:700;color:var(--accent);">${data.banco_detectado}</div></div>
-        <div class="card"><div class="stat-label">Movimientos encontrados</div><div class="stat-value stat-blue">${data.total_filas_validas}</div></div>
-        <div class="card"><div class="stat-label">Ingresos del período</div><div class="stat-value stat-green">$${s.total_ingresos.toLocaleString('es-CL')}</div></div>
-        <div class="card"><div class="stat-label">Egresos del período</div><div class="stat-value stat-red">$${s.total_egresos.toLocaleString('es-CL')}</div></div>
+        <div class="card"><div class="stat-label">Banco / Cuenta</div>
+          <div style="font-size:14px;font-weight:700;color:var(--accent);">${data.banco_detectado}</div>
+          <div style="font-size:11px;color:var(--text2);">${cuenta ? cuenta.nombre : ''} · ${data.moneda_cuenta}</div>
+        </div>
+        <div class="card"><div class="stat-label">Movimientos</div><div class="stat-value stat-blue">${data.total_filas_validas}</div>
+          <div style="font-size:11px;color:var(--text2);">${s.transferencias_internas} transferencias internas</div>
+        </div>
+        <div class="card"><div class="stat-label">Ingresos reales</div><div class="stat-value stat-green">$${Math.round(s.total_ingresos).toLocaleString('es-CL')}</div></div>
+        <div class="card"><div class="stat-label">Egresos reales</div><div class="stat-value stat-red">$${Math.round(s.total_egresos).toLocaleString('es-CL')}</div></div>
       </div>
       ${s.posibles_duplicados > 0 ? `<div style="background:rgba(234,179,8,.1);border:1px solid var(--yellow);border-radius:8px;padding:12px;font-size:13px;color:var(--yellow);margin-top:8px;">
-        ⚠️ Se detectaron <strong>${s.posibles_duplicados}</strong> posibles duplicados (ya existentes). Aparecen desmarcados — revisa antes de importar.
+        ⚠️ <strong>${s.posibles_duplicados}</strong> posibles duplicados. Aparecen desmarcados.
+      </div>` : ''}
+      ${s.transferencias_internas > 0 ? `<div style="background:rgba(99,102,241,.1);border:1px solid var(--accent);border-radius:8px;padding:12px;font-size:13px;color:var(--accent);margin-top:8px;">
+        🔄 <strong>${s.transferencias_internas}</strong> transferencias internas detectadas (conversiones, traspasos). Aparecen desmarcadas — no afectan el resultado.
       </div>` : ''}
       ${advertencias ? `<ul style="margin-top:8px;padding-left:20px;">${advertencias}</ul>` : ''}
     `;
 
     renderTablaPreview();
-
     document.getElementById('import-paso1').style.display = 'none';
     document.getElementById('import-paso2').style.display = 'block';
 
   } catch (e) {
-    showToast('Error al procesar el archivo: ' + e.message, 'error');
+    showToast('Error al procesar: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = 'Analizar Archivo';
   }
 }
+
+const COLORES_CATEGORIA = {
+  venta: 'var(--green)', aporte_socio: 'var(--blue)', interes_ganado: 'var(--green)',
+  pago_proveedor: 'var(--red)', pago_importacion: 'var(--red)', gasto_logistica: 'var(--yellow)',
+  remuneracion_norm: 'var(--red)', gasto_operacional: 'var(--red)', comision_bancaria: 'var(--yellow)',
+  pago_impuesto: 'var(--red)', transferencia_interna: 'var(--text2)', conversion_divisa: 'var(--text2)',
+  sin_clasificar: 'var(--yellow)',
+};
 
 function renderTablaPreview() {
   const tbody = document.getElementById('tabla-preview');
@@ -1513,29 +1803,38 @@ function renderTablaPreview() {
   document.getElementById('import-contador').textContent =
     `${seleccionados} de ${movimientosPreview.length} seleccionados`;
 
-  const opcionTipos = tiposDisponibles.map(t =>
-    `<option value="${t.value}">${t.label}</option>`
-  ).join('');
-
   tbody.innerHTML = movimientosPreview.map((m, i) => {
     const esIngreso = ['ingreso_banco','ingreso_caja','otro_ingreso','prestamo_recibido',
       'suma_boletas','suma_facturas_emitidas'].includes(m.tipo);
+    const cat = m.categoria_normalizada || 'sin_clasificar';
+    const catLabel = categoriasMov.find(c => c.value === cat)?.label || cat;
+    const colorCat = COLORES_CATEGORIA[cat] || 'var(--text2)';
+    const esInterna = m.es_transferencia_interna;
+
+    let aviso = '';
+    if (m.posible_duplicado) aviso = '<span style="color:var(--yellow);">⚠️ Duplicado</span>';
+    else if (esInterna) aviso = '<span style="color:var(--accent);">🔄 Interna</span>';
+    else if (m.clasificacion_confianza === 'baja') aviso = '<span style="color:var(--yellow);">❓ Revisar</span>';
+    else aviso = '<span style="color:var(--green);">✓ Nuevo</span>';
+
     return `
-    <tr style="${!m.incluir ? 'opacity:.45;' : ''}">
-      <td><input type="checkbox" ${m.incluir ? 'checked' : ''} onchange="toggleMovimiento(${i}, this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);"></td>
-      <td style="white-space:nowrap;">${m.fecha}</td>
-      <td style="max-width:220px;font-size:12px;color:var(--text2);">${m.descripcion}</td>
-      <td>
-        <select onchange="cambiarTipo(${i}, this.value)" style="font-size:12px;padding:4px 8px;width:200px;">
-          ${tiposDisponibles.map(t => `<option value="${t.value}" ${t.value === m.tipo ? 'selected' : ''}>${t.label}</option>`).join('')}
-        </select>
+    <tr style="${!m.incluir ? 'opacity:.4;' : ''}">
+      <td><input type="checkbox" ${m.incluir ? 'checked' : ''} onchange="toggleMovimiento(${i}, this.checked)"
+        style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);"></td>
+      <td style="white-space:nowrap;font-size:12px;">${m.fecha}</td>
+      <td style="max-width:200px;font-size:12px;">
+        <div style="color:var(--text);">${m.descripcion}</div>
+        ${m.tercero ? `<div style="color:var(--text2);font-size:11px;">👤 ${m.tercero}</div>` : ''}
       </td>
-      <td class="${esIngreso ? 'monto-ingreso' : 'monto-egreso'}" style="white-space:nowrap;">
-        ${esIngreso ? '+' : '-'}$${m.monto.toLocaleString('es-CL')}
+      <td style="font-size:12px;">
+        <span style="color:${colorCat};font-weight:600;">${catLabel}</span>
+        ${m.clasificacion_confianza === 'baja' ? '<span style="font-size:10px;color:var(--yellow);margin-left:4px;">baja confianza</span>' : ''}
       </td>
-      <td style="font-size:11px;">
-        ${m.posible_duplicado ? '<span style="color:var(--yellow);">⚠️ Posible duplicado</span>' : '<span style="color:var(--green);">✓ Nuevo</span>'}
+      <td class="${esIngreso && !esInterna ? 'monto-ingreso' : esInterna ? '' : 'monto-egreso'}"
+        style="white-space:nowrap;${esInterna ? 'color:var(--text2);' : ''}">
+        ${esInterna ? '↔' : (esIngreso ? '+' : '-')}$${Math.round(m.monto).toLocaleString('es-CL')}
       </td>
+      <td>${aviso}</td>
     </tr>`;
   }).join('');
 }
@@ -1543,10 +1842,6 @@ function renderTablaPreview() {
 function toggleMovimiento(idx, checked) {
   movimientosPreview[idx].incluir = checked;
   renderTablaPreview();
-}
-
-function cambiarTipo(idx, nuevoTipo) {
-  movimientosPreview[idx].tipo = nuevoTipo;
 }
 
 function seleccionarTodos(estado) {
@@ -1557,10 +1852,19 @@ function seleccionarTodos(estado) {
 async function confirmarImportacion() {
   const seleccionados = movimientosPreview.filter(m => m.incluir);
   if (!seleccionados.length) { showToast('Selecciona al menos un movimiento', 'error'); return; }
+  const cuentaId = document.getElementById('selector-cuenta')?.value || '';
 
   const data = await api('/api/banco/confirmar', {
     method: 'POST',
-    body: JSON.stringify({ movimientos: movimientosPreview }),
+    body: JSON.stringify({
+      movimientos: movimientosPreview,
+      cuenta_financiera_id: cuentaId,
+      hash_archivo: previewData.hash_archivo || '',
+      nombre_archivo: archivoCartola?.name || '',
+      banco_detectado: previewData.banco_detectado || '',
+      total_filas_archivo: previewData.total_filas_archivo || 0,
+      advertencias: previewData.advertencias || [],
+    }),
   });
 
   if (data.error) { showToast(data.error, 'error'); return; }
@@ -1573,6 +1877,7 @@ async function confirmarImportacion() {
 function resetImport() {
   archivoCartola = null;
   movimientosPreview = [];
+  previewData = {};
   document.getElementById('input-archivo').value = '';
   document.getElementById('archivo-info').style.display = 'none';
   document.getElementById('dropzone').style.borderColor = 'var(--border)';
@@ -1581,6 +1886,142 @@ function resetImport() {
   document.getElementById('import-paso1').style.display = 'block';
   document.getElementById('import-paso2').style.display = 'none';
   document.getElementById('import-paso3').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────
+// Revisión de Movimientos
+// ─────────────────────────────────────────────────────────
+let revisionData = {};
+let movClasificarId = null;
+
+function switchRevisionTab(tab, btn) {
+  document.querySelectorAll('.revision-tab').forEach(b => {
+    b.style.color = 'var(--text2)'; b.style.borderBottom = 'none';
+  });
+  btn.style.color = 'var(--accent)'; btn.style.borderBottom = '2px solid var(--accent)';
+  ['sin-clasificar', 'transferencias', 'duplicados'].forEach(t => {
+    const el = document.getElementById('revision-' + t);
+    if (el) el.style.display = t === tab ? 'block' : 'none';
+  });
+}
+
+async function cargarRevision() {
+  const data = await api('/api/revision/pendientes');
+  revisionData = data;
+
+  // Badge contadores
+  const badgeSC = document.getElementById('badge-sin-clasificar');
+  const badgeT = document.getElementById('badge-transferencias');
+  if (badgeSC) badgeSC.textContent = data.totales?.sin_clasificar || 0;
+  if (badgeT) badgeT.textContent = data.posibles_transferencias?.length || 0;
+
+  // Tabla sin clasificar
+  const tbodySC = document.getElementById('tabla-sin-clasificar');
+  if (tbodySC) {
+    tbodySC.innerHTML = data.sin_clasificar.map(m => `
+      <tr>
+        <td>${m.fecha}</td>
+        <td style="max-width:240px;">${m.descripcion}</td>
+        <td class="${m.monto > 0 ? 'monto-ingreso' : 'monto-egreso'}">$${Math.round(m.monto).toLocaleString('es-CL')}</td>
+        <td style="font-size:12px;color:var(--text2);">${m.cuenta}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="abrirClasificar('${m.id}', '${m.descripcion.replace(/'/g, "\'")}')">
+            Clasificar
+          </button>
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" class="empty">✅ No hay movimientos sin clasificar</td></tr>';
+  }
+
+  // Lista transferencias internas sugeridas
+  const listaT = document.getElementById('lista-transferencias');
+  if (listaT) {
+    if (!data.posibles_transferencias.length) {
+      listaT.innerHTML = '<div class="empty">✅ No hay transferencias internas pendientes de vincular</div>';
+    } else {
+      listaT.innerHTML = data.posibles_transferencias.map(p => `
+        <div class="card section-mb" style="border-left:3px solid var(--accent);">
+          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;">
+            <div>
+              <div style="font-size:12px;color:var(--text2);">${p.mov_egreso_fecha} · ${p.mov_egreso_cuenta}</div>
+              <div style="font-size:13px;">📤 ${p.mov_egreso_desc}</div>
+              <div style="font-weight:700;color:var(--red);">-$${Math.round(p.mov_egreso_monto).toLocaleString('es-CL')}</div>
+            </div>
+            <div style="text-align:center;font-size:20px;color:var(--accent);">↔</div>
+            <div>
+              <div style="font-size:12px;color:var(--text2);">${p.mov_ingreso_fecha} · ${p.mov_ingreso_cuenta}</div>
+              <div style="font-size:13px;">📥 ${p.mov_ingreso_desc}</div>
+              <div style="font-weight:700;color:var(--green);">+$${Math.round(p.mov_ingreso_monto).toLocaleString('es-CL')}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+            <span style="font-size:11px;color:var(--text2);">Confianza: ${p.confianza} · Diferencia: ${p.diferencia_dias} día(s)</span>
+            <button class="btn btn-primary btn-sm" onclick="confirmarTransferenciaInterna('${p.mov_egreso_id}', '${p.mov_ingreso_id}', this)">
+              ✅ Confirmar como interna
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="this.closest('.card').remove()">Ignorar</button>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  // Tabla duplicados
+  const tbodyD = document.getElementById('tabla-duplicados');
+  if (tbodyD) {
+    tbodyD.innerHTML = data.posibles_duplicados.map(d => `
+      <tr>
+        <td>${d.fecha}</td>
+        <td>$${Math.round(d.monto).toLocaleString('es-CL')}</td>
+        <td><span style="color:var(--yellow);font-weight:600;">${d.cantidad} registros</span></td>
+      </tr>
+    `).join('') || '<tr><td colspan="3" class="empty">✅ Sin duplicados detectados</td></tr>';
+  }
+}
+
+async function confirmarTransferenciaInterna(idA, idB, btn) {
+  const data = await api('/api/movimientos/' + idA + '/clasificar', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      categoria_normalizada: 'transferencia_interna',
+      es_transferencia_interna: true,
+      movimiento_relacionado_id: idB,
+    }),
+  });
+  if (data.ok) {
+    showToast('✅ Movimientos vinculados como transferencia interna');
+    btn.closest('.card').style.opacity = '.4';
+    btn.textContent = '✓ Confirmado';
+    btn.disabled = true;
+  } else {
+    showToast('Error: ' + (data.error || ''), 'error');
+  }
+}
+
+function abrirClasificar(movId, descripcion) {
+  movClasificarId = movId;
+  document.getElementById('modal-clasificar-desc').textContent = descripcion;
+  document.getElementById('mc-categoria').value = 'sin_clasificar';
+  document.getElementById('mc-tercero').value = '';
+  document.getElementById('mc-interna').checked = false;
+  document.getElementById('modal-clasificar').classList.add('show');
+}
+
+async function guardarClasificacion() {
+  if (!movClasificarId) return;
+  const data = await api('/api/movimientos/' + movClasificarId + '/clasificar', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      categoria_normalizada: document.getElementById('mc-categoria').value,
+      es_transferencia_interna: document.getElementById('mc-interna').checked,
+      tercero: document.getElementById('mc-tercero').value,
+    }),
+  });
+  if (data.ok) {
+    closeModal('modal-clasificar');
+    showToast('✅ Clasificación guardada');
+    cargarRevision();
+  }
 }
 
 // ─────────────────────────────────────────────────────────
