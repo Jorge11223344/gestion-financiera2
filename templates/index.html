@@ -45,7 +45,7 @@
   .nav-item.active { background: var(--bg3); color: var(--accent); border-left-color: var(--accent); }
   .nav-item .icon { font-size: 18px; width: 22px; text-align: center; }
 
-  .main { margin-left: 240px; flex: 1; padding: 28px 32px; }
+  .main { margin-left: 240px; flex: 1; padding: 28px 32px; min-width: 0; overflow-x: hidden; }
   .page { display: none; }
   .page.active { display: block; }
 
@@ -310,7 +310,10 @@
   <!-- Gráficos -->
   <div class="grid-2">
     <div class="card">
-      <div class="chart-title">Flujo Mensual — <span id="anio-flujo"></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="chart-title" style="margin-bottom:0;">Flujo Mensual</div>
+        <select id="selector-anio-flujo" onchange="cambiarAnioFlujo()" style="padding:4px 8px;font-size:12px;width:90px;"></select>
+      </div>
       <div class="chart-container"><canvas id="chart-flujo"></canvas></div>
     </div>
     <div class="card">
@@ -417,13 +420,16 @@
     <h1>Historial de Movimientos</h1>
     <p>Todos los movimientos registrados</p>
   </div>
-  <div class="filters">
-    <input type="date" id="filtro-desde" />
-    <input type="date" id="filtro-hasta" />
-    <select id="filtro-tipo" style="width:200px;">
+  <div class="filters" style="flex-wrap:wrap;gap:8px;">
+    <input type="date" id="filtro-desde" style="width:140px;" />
+    <input type="date" id="filtro-hasta" style="width:140px;" />
+    <select id="filtro-tipo" style="width:180px;">
       <option value="">Todos los tipos</option>
     </select>
-    <button class="btn btn-secondary btn-sm" onclick="cargarMovimientos()">🔍 Filtrar</button>
+    <select id="filtro-categoria" style="width:190px;">
+      <option value="">Todas las categorías</option>
+    </select>
+    <button class="btn btn-secondary btn-sm" onclick="cargarMovimientos(1)">🔍 Filtrar</button>
     <button class="btn btn-primary btn-sm" onclick="navTo('nuevo-movimiento')">➕ Nuevo</button>
   </div>
   <div class="card">
@@ -432,12 +438,12 @@
         <thead>
           <tr>
             <th>Fecha</th>
-            <th>Tipo</th>
+            <th>Categoría</th>
             <th>Descripción</th>
-            <th>Medio Pago</th>
+            <th>Cuenta</th>
             <th>Monto</th>
             <th>IVA</th>
-            <th></th>
+            <th style="width:80px;"></th>
           </tr>
         </thead>
         <tbody id="tabla-movimientos">
@@ -445,7 +451,10 @@
         </tbody>
       </table>
     </div>
-    <div id="movimientos-stats" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:24px;font-size:13px;color:var(--text2);">
+    <!-- Paginación -->
+    <div id="mov-paginacion" style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+      <div id="movimientos-stats" style="font-size:13px;color:var(--text2);display:flex;gap:20px;flex-wrap:wrap;"></div>
+      <div id="mov-paginas" style="display:flex;gap:4px;align-items:center;"></div>
     </div>
   </div>
 </div>
@@ -493,10 +502,17 @@
     <h1>Salud Financiera</h1>
     <p>Indicadores clave para entender cómo va tu empresa</p>
   </div>
-  <div class="periodo-bar">
+  <div class="periodo-bar" style="align-items:center;">
     <button class="periodo-btn active" onclick="setKpiPeriodo('mes', this)">Este mes</button>
     <button class="periodo-btn" onclick="setKpiPeriodo('trimestre', this)">Último trimestre</button>
     <button class="periodo-btn" onclick="setKpiPeriodo('anio', this)">Este año</button>
+    <div style="display:flex;gap:8px;align-items:center;margin-left:8px;">
+      <input type="date" id="kpi-desde-custom" style="padding:5px 8px;font-size:12px;width:135px;" />
+      <span style="color:var(--text2);font-size:12px;">a</span>
+      <input type="date" id="kpi-hasta-custom" style="padding:5px 8px;font-size:12px;width:135px;" />
+      <button class="btn btn-secondary btn-sm" onclick="setKpiPeriodo('custom', null)">Aplicar</button>
+    </div>
+    <span id="kpi-periodo-label" style="font-size:12px;color:var(--text2);margin-left:8px;"></span>
   </div>
   <div class="kpi-grid" id="kpi-detalle-container">
     <div class="loading">Calculando indicadores...</div>
@@ -1140,7 +1156,30 @@ async function cargarDashboard() {
 
   document.getElementById('dash-periodo-label').textContent =
     `Período: ${desde} al ${hasta}`;
-  document.getElementById('anio-flujo').textContent = new Date().getFullYear();
+
+  // Alerta movimientos sin clasificar
+  const sinClass = data.sin_clasificar || 0;
+  let alertDiv = document.getElementById('alerta-sin-clasificar');
+  if (!alertDiv) {
+    alertDiv = document.createElement('div');
+    alertDiv.id = 'alerta-sin-clasificar';
+    const header = document.querySelector('#page-dashboard .page-header');
+    if (header) header.insertAdjacentElement('afterend', alertDiv);
+  }
+  alertDiv.innerHTML = sinClass > 0
+    ? `<div style="background:rgba(234,179,8,.1);border:1px solid var(--yellow);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:var(--yellow);display:flex;justify-content:space-between;align-items:center;">
+        \u26a0\ufe0f <strong>${sinClass}</strong> movimientos sin clasificar afectan la precisión del balance.
+        <button class="btn btn-secondary btn-sm" onclick="navTo('revision')">Revisar ahora →</button>
+       </div>`
+    : '';
+  // Inicializar selector de año flujo
+  const selAnio = document.getElementById('selector-anio-flujo');
+  if (selAnio && selAnio.options.length === 0) {
+    const anioHoy = new Date().getFullYear();
+    for (let y = anioHoy - 3; y <= anioHoy; y++) {
+      selAnio.innerHTML += `<option value="${y}" ${y===anioHoy?'selected':''}>${y}</option>`;
+    }
+  }
 
   // Stats
   document.getElementById('stat-saldo').textContent = fmt(data.saldo_actual);
@@ -1166,12 +1205,19 @@ async function cargarDashboard() {
 
   // Últimos movimientos
   const tbody = document.getElementById('tabla-ultimos');
-  tbody.innerHTML = data.ultimos_movimientos.map(m => `
-    <tr>
-      <td>${m.fecha}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.descripcion}</td>
-      <td class="${m.es_ingreso ? 'monto-ingreso' : 'monto-egreso'}">${m.es_ingreso ? '+' : '-'}${fmt(m.monto)}</td>
-    </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin movimientos</td></tr>';
+  tbody.innerHTML = data.ultimos_movimientos.map(m => {
+      const esInt = m.es_transferencia_interna;
+      const cat = m.categoria_normalizada || '';
+      const catLabel = CAT_LABELS && CAT_LABELS[cat] ? CAT_LABELS[cat] : m.tipo_display;
+      const color = esInt ? 'var(--text2)' : m.es_ingreso ? 'var(--green)' : 'var(--red)';
+      return `<tr>
+        <td style="font-size:12px;white-space:nowrap;">${m.fecha}</td>
+        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;">${m.descripcion}</td>
+        <td style="font-size:11px;color:${color};font-weight:600;white-space:nowrap;">
+          ${esInt ? '↔' : (m.es_ingreso ? '+' : '-')}${fmt(m.monto)}
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="3" class="empty">Sin movimientos</td></tr>';
 }
 
 function renderKpis(kpis, containerId) {
@@ -1186,7 +1232,15 @@ function renderKpis(kpis, containerId) {
     </div>`).join('');
 }
 
-function renderChartFlujo(flujo) {
+async function cambiarAnioFlujo() {
+  const anio = parseInt(document.getElementById('selector-anio-flujo').value);
+  const { desde, hasta } = getDesdeHasta();
+  // Pedir solo el flujo del año seleccionado
+  const data = await api(`/api/dashboard?desde=${anio}-01-01&hasta=${anio}-12-31`);
+  renderChartFlujo(data.flujo_mensual, anio);
+}
+
+function renderChartFlujo(flujo, anioLabel) {
   destroyChart('flujo');
   const ctx = document.getElementById('chart-flujo').getContext('2d');
   charts['flujo'] = new Chart(ctx, {
@@ -1257,6 +1311,8 @@ function renderChartVentas(ventas) {
 async function initFormMovimiento() {
   document.getElementById('mov-fecha').value = today();
   const data = await api('/api/tipos');
+
+  // Llenar selector de tipo en nuevo movimiento
   const sel = document.getElementById('mov-tipo');
   sel.innerHTML = '<option value="">Selecciona...</option>';
   data.tipos.forEach(t => {
@@ -1264,14 +1320,32 @@ async function initFormMovimiento() {
     opt.value = t.value; opt.textContent = t.label;
     sel.appendChild(opt);
   });
-  // También llenar filtro de historial
-  const filtro = document.getElementById('filtro-tipo');
-  filtro.innerHTML = '<option value="">Todos los tipos</option>';
-  data.tipos.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.value; opt.textContent = t.label;
-    filtro.appendChild(opt);
-  });
+
+  // Llenar filtro tipo en historial
+  const filtroTipo = document.getElementById('filtro-tipo');
+  if (filtroTipo) {
+    filtroTipo.innerHTML = '<option value="">Todos los tipos</option>';
+    data.tipos.forEach(t => {
+      filtroTipo.innerHTML += `<option value="${t.value}">${t.label}</option>`;
+    });
+  }
+
+  // Llenar filtro categoría en historial
+  const filtroCat = document.getElementById('filtro-categoria');
+  if (filtroCat && data.categorias) {
+    filtroCat.innerHTML = '<option value="">Todas las categorías</option>';
+    data.categorias.forEach(c => {
+      filtroCat.innerHTML += `<option value="${c.value}">${c.label}</option>`;
+    });
+  }
+
+  // Llenar selector categoría en modal clasificar
+  const selCat = document.getElementById('mc-categoria');
+  if (selCat && data.categorias) {
+    selCat.innerHTML = data.categorias.map(c =>
+      `<option value="${c.value}">${c.label}</option>`
+    ).join('');
+  }
 }
 
 function onTipoChange() {
@@ -1338,44 +1412,177 @@ function limpiarFormMovimiento() {
 // ─────────────────────────────────────────────────────────
 // Historial Movimientos
 // ─────────────────────────────────────────────────────────
-async function cargarMovimientos() {
-  const desde = document.getElementById('filtro-desde').value;
-  const hasta = document.getElementById('filtro-hasta').value;
-  const tipo = document.getElementById('filtro-tipo').value;
+// ── Historial paginado ─────────────────────────────────────
+const MOV_POR_PAG = 50;
+let movPagActual = 1;
+let movTodos = [];
 
-  let url = '/api/movimientos?limit=200';
-  if (desde) url += `&desde=${desde}`;
-  if (hasta) url += `&hasta=${hasta}`;
-  if (tipo) url += `&tipo=${tipo}`;
+async function cargarMovimientos(pagina = 1) {
+  movPagActual = pagina;
+  const desde     = document.getElementById('filtro-desde').value;
+  const hasta     = document.getElementById('filtro-hasta').value;
+  const tipo      = document.getElementById('filtro-tipo').value;
+  const categoria = document.getElementById('filtro-categoria')?.value || '';
+
+  // Cargar todos para paginación cliente (máx 2000 para no sobrecargar)
+  let url = '/api/movimientos?limit=2000';
+  if (desde)     url += `&desde=${desde}`;
+  if (hasta)     url += `&hasta=${hasta}`;
+  if (tipo)      url += `&tipo=${tipo}`;
+  if (categoria) url += `&categoria=${categoria}`;
 
   const data = await api(url);
-  const tbody = document.getElementById('tabla-movimientos');
+  movTodos = data.movimientos || [];
+  renderMovimientos();
+}
 
-  if (!data.movimientos.length) {
+const CAT_LABELS = {
+  venta:'Venta', aporte_socio:'Aporte Socio', interes_ganado:'Interés',
+  pago_proveedor:'Proveedor', pago_importacion:'Importación',
+  gasto_logistica:'Logística', remuneracion_norm:'Remuneración',
+  gasto_operacional:'Gasto Op.', comision_bancaria:'Comisión',
+  pago_impuesto:'Impuesto', pago_prestamo_norm:'Préstamo',
+  transferencia_interna:'Interna', conversion_divisa:'Conversión',
+  sin_clasificar:'Sin clasificar',
+};
+const CAT_COLORS = {
+  venta:'var(--green)', aporte_socio:'var(--blue)', interes_ganado:'var(--green)',
+  pago_importacion:'var(--red)', gasto_logistica:'var(--yellow)',
+  remuneracion_norm:'var(--red)', comision_bancaria:'var(--yellow)',
+  pago_impuesto:'var(--red)', transferencia_interna:'var(--text2)',
+  conversion_divisa:'var(--text2)', sin_clasificar:'var(--yellow)',
+  pago_proveedor:'var(--red)', gasto_operacional:'var(--red)',
+};
+
+function renderMovimientos() {
+  const tbody   = document.getElementById('tabla-movimientos');
+  const total   = movTodos.length;
+  const paginas = Math.ceil(total / MOV_POR_PAG) || 1;
+  const inicio  = (movPagActual - 1) * MOV_POR_PAG;
+  const slice   = movTodos.slice(inicio, inicio + MOV_POR_PAG);
+
+  if (!total) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty">Sin movimientos para este período</td></tr>';
+    document.getElementById('movimientos-stats').innerHTML = '';
+    document.getElementById('mov-paginas').innerHTML = '';
     return;
   }
 
   let totIngreso = 0, totEgreso = 0;
-  tbody.innerHTML = data.movimientos.map(m => {
-    if (m.es_ingreso) totIngreso += m.monto; else totEgreso += m.monto;
+  movTodos.forEach(m => {
+    if (m.es_ingreso && !m.es_transferencia_interna) totIngreso += m.monto;
+    else if (!m.es_ingreso && !m.es_transferencia_interna) totEgreso += m.monto;
+  });
+
+  tbody.innerHTML = slice.map(m => {
+    const cat      = m.categoria_normalizada || 'sin_clasificar';
+    const catLabel = CAT_LABELS[cat] || cat;
+    const catColor = CAT_COLORS[cat] || 'var(--text2)';
+    const esInt    = m.es_transferencia_interna;
+    const moneda   = m.moneda !== 'CLP' ? ` <span style="font-size:10px;color:var(--text2);">${m.moneda}</span>` : '';
     return `
     <tr>
-      <td>${m.fecha}</td>
-      <td><span class="badge ${m.es_ingreso ? 'badge-green' : 'badge-red'}">${m.tipo_display}</span></td>
-      <td style="max-width:200px;">${m.descripcion}${m.cantidad_documentos ? ` <small style="color:var(--text2)">(${m.cantidad_documentos} docs)</small>` : ''}</td>
-      <td style="color:var(--text2);">${m.medio_pago_display}</td>
-      <td class="${m.es_ingreso ? 'monto-ingreso' : 'monto-egreso'}">${m.es_ingreso ? '+' : '-'}${fmt(m.monto)}</td>
+      <td style="white-space:nowrap;font-size:12px;">${m.fecha}</td>
+      <td>
+        <span style="color:${catColor};font-size:12px;font-weight:600;">${catLabel}</span>
+        ${esInt ? '<span style="font-size:10px;color:var(--text2);margin-left:4px;">↔</span>' : ''}
+      </td>
+      <td style="max-width:220px;">
+        <div style="font-size:13px;">${m.descripcion}</div>
+        ${m.tercero ? `<div style="font-size:11px;color:var(--text2);">👤 ${m.tercero}</div>` : ''}
+        ${m.cantidad_documentos ? `<small style="color:var(--text2);">(${m.cantidad_documentos} docs)</small>` : ''}
+      </td>
+      <td style="font-size:12px;color:var(--text2);">${m.cuenta_financiera || '—'}</td>
+      <td class="${m.es_ingreso && !esInt ? 'monto-ingreso' : esInt ? '' : 'monto-egreso'}"
+          style="${esInt ? 'color:var(--text2);' : ''}">
+        ${esInt ? '↔' : (m.es_ingreso ? '+' : '-')}${fmt(m.monto)}${moneda}
+      </td>
       <td style="color:var(--text2);font-size:12px;">${m.monto_iva ? fmt(m.monto_iva) : '-'}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="eliminarMovimiento('${m.id}')">🗑</button></td>
+      <td style="display:flex;gap:4px;">
+        <button class="btn btn-secondary btn-sm" title="Editar clasificación"
+          onclick="abrirEditarMovimiento('${m.id}','${(m.descripcion||'').replace(/'/g,"\'")}','${cat}','${(m.tercero||'').replace(/'/g,"\'")}',${esInt})">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarMovimiento('${m.id}')">🗑</button>
+      </td>
     </tr>`;
   }).join('');
 
+  // Stats
   document.getElementById('movimientos-stats').innerHTML =
-    `<span>Total registros: <strong>${data.movimientos.length}</strong></span>
+    `<span>Total: <strong>${total}</strong></span>
      <span>Ingresos: <strong style="color:var(--green)">${fmt(totIngreso)}</strong></span>
      <span>Egresos: <strong style="color:var(--red)">${fmt(totEgreso)}</strong></span>
-     <span>Resultado: <strong style="color:${totIngreso-totEgreso>=0?'var(--green)':'var(--red)'}">${fmt(totIngreso-totEgreso)}</strong></span>`;
+     <span>Resultado: <strong style="color:${totIngreso-totEgreso>=0?'var(--green)':'var(--red)'}">${fmt(totIngreso-totEgreso)}</strong></span>
+     <span style="color:var(--text2);">Página ${movPagActual}/${paginas}</span>`;
+
+  // Paginación
+  let pagHtml = '';
+  if (paginas > 1) {
+    pagHtml += `<button class="btn btn-secondary btn-sm" onclick="renderMovPagina(${movPagActual-1})" ${movPagActual===1?'disabled':''}>‹</button>`;
+    const rango = 5;
+    let desde2 = Math.max(1, movPagActual - 2);
+    let hasta2 = Math.min(paginas, desde2 + rango - 1);
+    if (hasta2 - desde2 < rango - 1) desde2 = Math.max(1, hasta2 - rango + 1);
+    if (desde2 > 1) pagHtml += `<button class="btn btn-secondary btn-sm" onclick="renderMovPagina(1)">1</button><span style="color:var(--text2);padding:0 4px;">…</span>`;
+    for (let p = desde2; p <= hasta2; p++) {
+      pagHtml += `<button class="btn ${p===movPagActual?'btn-primary':'btn-secondary'} btn-sm" onclick="renderMovPagina(${p})">${p}</button>`;
+    }
+    if (hasta2 < paginas) pagHtml += `<span style="color:var(--text2);padding:0 4px;">…</span><button class="btn btn-secondary btn-sm" onclick="renderMovPagina(${paginas})">${paginas}</button>`;
+    pagHtml += `<button class="btn btn-secondary btn-sm" onclick="renderMovPagina(${movPagActual+1})" ${movPagActual===paginas?'disabled':''}>›</button>`;
+  }
+  document.getElementById('mov-paginas').innerHTML = pagHtml;
+}
+
+function renderMovPagina(p) {
+  const paginas = Math.ceil(movTodos.length / MOV_POR_PAG);
+  if (p < 1 || p > paginas) return;
+  movPagActual = p;
+  renderMovimientos();
+  document.getElementById('page-movimientos').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ── Editar clasificación de un movimiento ─────────────────
+let movEditandoId = null;
+
+function abrirEditarMovimiento(id, descripcion, catActual, terceroActual, esInterna) {
+  movEditandoId = id;
+  document.getElementById('modal-clasificar-desc').textContent = descripcion;
+  const selCat = document.getElementById('mc-categoria');
+  if (selCat) selCat.value = catActual;
+  const inputTercero = document.getElementById('mc-tercero');
+  if (inputTercero) inputTercero.value = terceroActual;
+  const chkInterna = document.getElementById('mc-interna');
+  if (chkInterna) chkInterna.checked = esInterna;
+  document.getElementById('modal-clasificar').classList.add('show');
+}
+
+async function guardarClasificacion() {
+  const id = movEditandoId || movClasificarId;
+  if (!id) return;
+  const body = {
+    categoria_normalizada:    document.getElementById('mc-categoria').value,
+    es_transferencia_interna: document.getElementById('mc-interna').checked,
+    tercero:                  document.getElementById('mc-tercero').value,
+  };
+  const data = await api(`/api/movimientos/${id}/clasificar`, {
+    method: 'PATCH', body: JSON.stringify(body),
+  });
+  if (data.ok) {
+    closeModal('modal-clasificar');
+    showToast('✅ Clasificación guardada');
+    movEditandoId = null;
+    movClasificarId = null;
+    // Actualizar en memoria sin recargar todo
+    const mov = movTodos.find(m => m.id === id);
+    if (mov) {
+      mov.categoria_normalizada    = body.categoria_normalizada;
+      mov.es_transferencia_interna = body.es_transferencia_interna;
+      mov.tercero                  = body.tercero;
+    }
+    renderMovimientos();
+    if (typeof cargarRevision === 'function') cargarRevision();
+  } else {
+    showToast('Error: ' + (data.error || ''), 'error');
+  }
 }
 
 function eliminarMovimiento(id) {
@@ -1436,8 +1643,10 @@ async function cargarCierres() {
 let kpiDesde = '', kpiHasta = '';
 
 function setKpiPeriodo(tipo, btn) {
-  document.querySelectorAll('#page-kpis .periodo-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  if (btn) {
+    document.querySelectorAll('#page-kpis .periodo-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
   const hoy = new Date();
   if (tipo === 'mes') {
     kpiDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
@@ -1449,7 +1658,14 @@ function setKpiPeriodo(tipo, btn) {
   } else if (tipo === 'anio') {
     kpiDesde = `${hoy.getFullYear()}-01-01`;
     kpiHasta = today();
+  } else if (tipo === 'custom') {
+    const d = document.getElementById('kpi-desde-custom')?.value;
+    const h = document.getElementById('kpi-hasta-custom')?.value;
+    if (!d || !h) { showToast('Selecciona ambas fechas', 'error'); return; }
+    kpiDesde = d; kpiHasta = h;
   }
+  const lbl = document.getElementById('kpi-periodo-label');
+  if (lbl) lbl.textContent = `${kpiDesde} → ${kpiHasta}`;
   cargarKpis();
 }
 
@@ -1463,24 +1679,60 @@ async function cargarKpis() {
   renderKpis(data.kpis, 'kpi-detalle-container');
 
   const r = data.resumen;
+  const fmtR = (v) => v ? fmt(v) : '$0';
   document.getElementById('estado-resultados').innerHTML = `
-    <table style="width:100%;font-size:13px;">
-      <tr><td style="color:var(--text2);padding:6px 0;">Ventas / Ingresos</td><td style="text-align:right;color:var(--green);font-weight:600;">${fmt(r.ventas)}</td></tr>
-      <tr><td style="color:var(--text2);padding:6px 0;">(-) Costo de Ventas</td><td style="text-align:right;color:var(--red);">(${fmt(r.costos)})</td></tr>
-      <tr style="border-top:1px solid var(--border);">
-        <td style="padding:8px 0;font-weight:700;">Utilidad Bruta</td>
-        <td style="text-align:right;font-weight:700;color:${r.utilidad_bruta>=0?'var(--green)':'var(--red)'};">${fmt(r.utilidad_bruta)}</td>
+    <table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <tr style="background:rgba(34,197,94,.07);">
+        <td style="padding:7px 6px;font-weight:600;">Ventas / Ingresos operacionales</td>
+        <td style="text-align:right;color:var(--green);font-weight:700;padding:7px 6px;">${fmtR(r.ventas)}</td>
       </tr>
-      <tr><td style="color:var(--text2);padding:6px 0;">Margen Bruto</td><td style="text-align:right;color:var(--text2);">${r.margen_bruto}%</td></tr>
-      <tr><td style="color:var(--text2);padding:6px 0;">(-) Remuneraciones</td><td style="text-align:right;color:var(--red);">(${fmt(r.remuneraciones)})</td></tr>
-      <tr><td style="color:var(--text2);padding:6px 0;">(-) Impuestos</td><td style="text-align:right;color:var(--red);">(${fmt(r.impuestos)})</td></tr>
-      <tr style="border-top:1px solid var(--border);">
-        <td style="padding:8px 0;font-weight:700;">Utilidad Operacional</td>
-        <td style="text-align:right;font-weight:700;color:${r.utilidad_operacional>=0?'var(--green)':'var(--red)'};">${fmt(r.utilidad_operacional)}</td>
+      ${r.aportes_socio > 0 ? `<tr>
+        <td style="padding:5px 6px;color:var(--text2);font-size:12px;">  + Aportes de Socio</td>
+        <td style="text-align:right;color:var(--blue);padding:5px 6px;">${fmtR(r.aportes_socio)}</td>
+      </tr>` : ''}
+      ${r.intereses > 0 ? `<tr>
+        <td style="padding:5px 6px;color:var(--text2);font-size:12px;">  + Intereses Ganados</td>
+        <td style="text-align:right;color:var(--green);padding:5px 6px;">${fmtR(r.intereses)}</td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding:5px 6px;color:var(--text2);">(-) Costo de Ventas / Importaciones</td>
+        <td style="text-align:right;color:var(--red);padding:5px 6px;">(${fmtR(r.costos)})</td>
       </tr>
-      <tr style="border-top:2px solid var(--border);background:var(--bg3);">
-        <td style="padding:10px 8px;font-weight:700;font-size:15px;">RESULTADO NETO</td>
-        <td style="text-align:right;font-weight:700;font-size:15px;color:${r.resultado_neto>=0?'var(--green)':'var(--red)'};">${fmt(r.resultado_neto)}</td>
+      <tr style="border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+        <td style="padding:8px 6px;font-weight:700;">= Utilidad Bruta</td>
+        <td style="text-align:right;font-weight:700;padding:8px 6px;color:${(r.utilidad_bruta||0)>=0?'var(--green)':'var(--red)'};">${fmtR(r.utilidad_bruta)}</td>
+      </tr>
+      <tr><td style="padding:4px 6px 4px 16px;font-size:11px;color:var(--text2);">Margen bruto</td>
+          <td style="text-align:right;font-size:11px;color:var(--text2);padding:4px 6px;">${r.margen_bruto||0}%</td></tr>
+      <tr>
+        <td style="padding:5px 6px;color:var(--text2);">(-) Remuneraciones</td>
+        <td style="text-align:right;color:var(--red);padding:5px 6px;">(${fmtR(r.remuneraciones)})</td>
+      </tr>
+      ${(r.logistica||0) > 0 ? `<tr>
+        <td style="padding:5px 6px;color:var(--text2);">(-) Logística / Transporte</td>
+        <td style="text-align:right;color:var(--red);padding:5px 6px;">(${fmtR(r.logistica)})</td>
+      </tr>` : ''}
+      ${(r.comisiones||0) > 0 ? `<tr>
+        <td style="padding:5px 6px;color:var(--text2);">(-) Comisiones Bancarias</td>
+        <td style="text-align:right;color:var(--yellow);padding:5px 6px;">(${fmtR(r.comisiones)})</td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding:5px 6px;color:var(--text2);">(-) Impuestos</td>
+        <td style="text-align:right;color:var(--red);padding:5px 6px;">(${fmtR(r.impuestos)})</td>
+      </tr>
+      <tr style="border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+        <td style="padding:8px 6px;font-weight:700;">= Utilidad Operacional</td>
+        <td style="text-align:right;font-weight:700;padding:8px 6px;color:${(r.utilidad_operacional||0)>=0?'var(--green)':'var(--red)'};">${fmtR(r.utilidad_operacional)}</td>
+      </tr>
+      <tr style="background:var(--bg3);">
+        <td style="padding:12px 8px;font-weight:700;font-size:15px;">RESULTADO NETO</td>
+        <td style="text-align:right;font-weight:700;font-size:15px;padding:12px 8px;color:${(r.resultado_neto||0)>=0?'var(--green)':'var(--red)'};">${fmtR(r.resultado_neto)}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:8px 6px;font-size:11px;color:var(--text2);">
+          ⚠️ Los valores marcados como Transferencias Internas y Conversiones de Divisa 
+          están excluidos de este estado de resultados.
+        </td>
       </tr>
     </table>`;
 }
@@ -2007,22 +2259,7 @@ function abrirClasificar(movId, descripcion) {
   document.getElementById('modal-clasificar').classList.add('show');
 }
 
-async function guardarClasificacion() {
-  if (!movClasificarId) return;
-  const data = await api('/api/movimientos/' + movClasificarId + '/clasificar', {
-    method: 'PATCH',
-    body: JSON.stringify({
-      categoria_normalizada: document.getElementById('mc-categoria').value,
-      es_transferencia_interna: document.getElementById('mc-interna').checked,
-      tercero: document.getElementById('mc-tercero').value,
-    }),
-  });
-  if (data.ok) {
-    closeModal('modal-clasificar');
-    showToast('✅ Clasificación guardada');
-    cargarRevision();
-  }
-}
+
 
 // ─────────────────────────────────────────────────────────
 // ASISTENTE CONTABLE DE BALANCE
