@@ -256,25 +256,90 @@ def calcular_iva(monto_bruto):
     return {'neto': neto, 'iva': iva, 'bruto': monto_bruto}
 
 
+def _get_tipo_cambio_vigente(moneda: str) -> Decimal:
+    """
+    Retorna el tipo de cambio más reciente registrado en movimientos
+    para la moneda dada respecto a CLP.
+    Si no hay registros, usa un valor de respaldo conservador.
+    Esto evita llamadas a APIs externas y mantiene coherencia con los
+    datos reales de la empresa.
+    """
+    if moneda == 'CLP':
+        return Decimal('1')
+
+    from .models import MovimientoDiario
+    # Busca el último movimiento con tipo_cambio registrado para esa moneda
+    ultimo = (MovimientoDiario.objects
+              .filter(moneda=moneda, tipo_cambio__isnull=False)
+              .order_by('-fecha', '-creado_en')
+              .values('tipo_cambio')
+              .first())
+
+    if ultimo and ultimo['tipo_cambio']:
+        return Decimal(str(ultimo['tipo_cambio']))
+
+    # Fallback si nunca se ha registrado tipo de cambio para esa moneda
+    FALLBACKS = {
+        'USD': Decimal('950'),
+        'EUR': Decimal('1030'),
+    }
+    return FALLBACKS.get(moneda, Decimal('1'))
+
+
 def get_saldo_actual():
-    from .models import MovimientoDiario, ConfiguracionEmpresa
+    """
+    Saldo consolidado en CLP considerando todas las cuentas.
+    - Cuentas CLP: saldo en CLP directamente.
+    - Cuentas USD/EUR: saldo en moneda original × tipo de cambio vigente.
+    - Incluye saldo_inicial de ConfiguracionEmpresa para cuentas sin CuentaFinanciera.
+    """
+    from .models import MovimientoDiario, ConfiguracionEmpresa, CuentaFinanciera
 
     config = ConfiguracionEmpresa.get()
-    saldo_inicial = config.saldo_inicial_caja + config.saldo_inicial_banco
 
-    # El saldo SÍ incluye transferencias internas (afectan el saldo real de caja)
-    total_ingresos = MovimientoDiario.objects.filter(
-        tipo__in=_TIPOS_INGRESO
-    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-    total_egresos = MovimientoDiario.objects.exclude(
-        tipo__in=_TIPOS_INGRESO
-    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    # Movimientos sin cuenta financiera asignada (legado / ingreso manual)
+    movs_sin_cuenta = MovimientoDiario.objects.filter(cuenta_financiera__isnull=True)
+    ing_sc = movs_sin_cuenta.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    egr_sc = movs_sin_cuenta.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    saldo_legacy = config.saldo_inicial_caja + config.saldo_inicial_banco + ing_sc - egr_sc
 
-    return saldo_inicial + total_ingresos - total_egresos
+    # Movimientos con cuenta financiera: calculamos saldo por cuenta en su moneda,
+    # luego convertimos a CLP para consolidar
+    saldo_cuentas_clp = Decimal('0')
+    cuentas = CuentaFinanciera.objects.filter(activa=True)
+    for cuenta in cuentas:
+        movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
+        # Para cuentas en moneda extranjera, usamos monto_moneda_orig cuando está disponible
+        if cuenta.moneda == 'CLP':
+            ingresos = movs.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+            egresos  = movs.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+            saldo_moneda = cuenta.saldo_inicial + ingresos - egresos
+            saldo_cuentas_clp += saldo_moneda
+        else:
+            # Moneda extranjera: calculamos saldo en moneda original
+            ingresos_orig = (movs.filter(tipo__in=_TIPOS_INGRESO, monto_moneda_orig__isnull=False)
+                             .aggregate(t=Sum('monto_moneda_orig'))['t'] or Decimal('0'))
+            egresos_orig  = (movs.exclude(tipo__in=_TIPOS_INGRESO).filter(monto_moneda_orig__isnull=False)
+                             .aggregate(t=Sum('monto_moneda_orig'))['t'] or Decimal('0'))
+            # Para movimientos sin monto_moneda_orig (ingresados manualmente), usamos monto en CLP
+            ingresos_clp_fallback = (movs.filter(tipo__in=_TIPOS_INGRESO, monto_moneda_orig__isnull=True)
+                                     .aggregate(t=Sum('monto'))['t'] or Decimal('0'))
+            egresos_clp_fallback  = (movs.exclude(tipo__in=_TIPOS_INGRESO).filter(monto_moneda_orig__isnull=True)
+                                     .aggregate(t=Sum('monto'))['t'] or Decimal('0'))
+            saldo_moneda_orig = cuenta.saldo_inicial + ingresos_orig - egresos_orig
+            tc = _get_tipo_cambio_vigente(cuenta.moneda)
+            saldo_cuentas_clp += saldo_moneda_orig * tc + ingresos_clp_fallback - egresos_clp_fallback
+
+    return saldo_legacy + saldo_cuentas_clp
 
 
 def get_saldo_por_cuenta():
-    """Retorna saldo actual desglosado por cuenta financiera."""
+    """
+    Retorna saldo por cuenta financiera con:
+    - saldo en moneda original de la cuenta
+    - saldo equivalente en CLP (para consolidación)
+    - tipo de cambio usado
+    """
     from .models import MovimientoDiario, CuentaFinanciera
 
     cuentas = CuentaFinanciera.objects.filter(activa=True)
@@ -282,15 +347,43 @@ def get_saldo_por_cuenta():
 
     for cuenta in cuentas:
         movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
-        ingresos = movs.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-        egresos = movs.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-        saldo = cuenta.saldo_inicial + ingresos - egresos
+
+        if cuenta.moneda == 'CLP':
+            ingresos = movs.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+            egresos  = movs.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+            saldo_orig = cuenta.saldo_inicial + ingresos - egresos
+            saldo_clp  = saldo_orig
+            tc = Decimal('1')
+        else:
+            # Saldo en moneda original
+            ingresos_orig = (movs.filter(tipo__in=_TIPOS_INGRESO, monto_moneda_orig__isnull=False)
+                             .aggregate(t=Sum('monto_moneda_orig'))['t'] or Decimal('0'))
+            egresos_orig  = (movs.exclude(tipo__in=_TIPOS_INGRESO).filter(monto_moneda_orig__isnull=False)
+                             .aggregate(t=Sum('monto_moneda_orig'))['t'] or Decimal('0'))
+            saldo_orig = cuenta.saldo_inicial + ingresos_orig - egresos_orig
+
+            # Convertir a CLP con tipo de cambio vigente
+            tc = _get_tipo_cambio_vigente(cuenta.moneda)
+            # Sumar también movimientos sin monto_moneda_orig (ya estaban en CLP)
+            ingresos_clp_fb = (movs.filter(tipo__in=_TIPOS_INGRESO, monto_moneda_orig__isnull=True)
+                               .aggregate(t=Sum('monto'))['t'] or Decimal('0'))
+            egresos_clp_fb  = (movs.exclude(tipo__in=_TIPOS_INGRESO).filter(monto_moneda_orig__isnull=True)
+                               .aggregate(t=Sum('monto'))['t'] or Decimal('0'))
+            saldo_clp = saldo_orig * tc + ingresos_clp_fb - egresos_clp_fb
+
+        # Indicar si el tipo de cambio es estimado (sin movimientos reales registrados)
+        tc_es_estimado = (cuenta.moneda != 'CLP' and
+                          not movs.filter(tipo_cambio__isnull=False).exists())
+
         resultado.append({
-            'cuenta_id': str(cuenta.pk),
-            'nombre': cuenta.nombre,
-            'institucion': cuenta.institucion,
-            'moneda': cuenta.moneda,
-            'saldo': float(saldo),
+            'cuenta_id':       str(cuenta.pk),
+            'nombre':          cuenta.nombre,
+            'institucion':     cuenta.institucion,
+            'moneda':          cuenta.moneda,
+            'saldo':           float(round(saldo_orig, 2)),          # en moneda original
+            'saldo_clp':       float(round(saldo_clp, 0)),           # equivalente en CLP
+            'tipo_cambio':     float(tc),
+            'tc_estimado':     tc_es_estimado,                       # True = TC sin movimientos reales
         })
 
     return resultado

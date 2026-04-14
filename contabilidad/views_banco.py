@@ -460,3 +460,90 @@ def tipos_para_selector(request):
     tipos = [{"value": k, "label": v} for k, v in MovimientoDiario.TIPOS]
     categorias = [{"value": k, "label": v} for k, v in MovimientoDiario.CATEGORIAS_NORM]
     return JsonResponse({"tipos": tipos, "categorias": categorias})
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TIPO DE CAMBIO
+# ──────────────────────────────────────────────────────────────────────────────
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def tipo_cambio(request):
+    """
+    GET  /api/tipo-cambio/?moneda=USD
+         Retorna el tipo de cambio vigente para la moneda dada.
+         Usa el último tipo_cambio registrado en movimientos reales,
+         con fallback a un valor conservador si no hay datos.
+
+    POST /api/tipo-cambio/
+         Body: {"moneda": "USD", "tipo_cambio": 950.50, "movimiento_id": "<uuid>"}
+         Actualiza el tipo_cambio de un movimiento específico.
+         Útil para corregir un TC mal registrado en la importación.
+    """
+    from .models import MovimientoDiario
+    from .utils import _get_tipo_cambio_vigente
+    from decimal import Decimal, InvalidOperation
+
+    if request.method == "GET":
+        moneda = request.GET.get("moneda", "USD").upper()
+        tc = _get_tipo_cambio_vigente(moneda)
+
+        # ¿Es estimado o tiene respaldo real?
+        tiene_real = MovimientoDiario.objects.filter(
+            moneda=moneda, tipo_cambio__isnull=False
+        ).exists()
+
+        ultimo_mov = (MovimientoDiario.objects
+                      .filter(moneda=moneda, tipo_cambio__isnull=False)
+                      .order_by('-fecha')
+                      .values('fecha', 'tipo_cambio')
+                      .first())
+
+        return JsonResponse({
+            "moneda":        moneda,
+            "tipo_cambio":   float(tc),
+            "es_estimado":   not tiene_real,
+            "ultima_fecha":  str(ultimo_mov['fecha']) if ultimo_mov else None,
+            "aviso": (
+                "Tipo de cambio estimado. Registra un movimiento en USD con tipo de cambio "
+                "para que el sistema use el valor real de tu empresa."
+                if not tiene_real else None
+            ),
+        })
+
+    # POST: actualizar TC de un movimiento puntual
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "JSON inválido"}, status=400)
+
+    mov_id = body.get("movimiento_id")
+    nuevo_tc = body.get("tipo_cambio")
+
+    if not mov_id or not nuevo_tc:
+        return JsonResponse({"error": "Se requiere movimiento_id y tipo_cambio"}, status=400)
+
+    try:
+        mov = MovimientoDiario.objects.get(pk=mov_id)
+    except MovimientoDiario.DoesNotExist:
+        return JsonResponse({"error": "Movimiento no encontrado"}, status=404)
+
+    try:
+        tc_decimal = Decimal(str(nuevo_tc))
+        if tc_decimal <= 0:
+            raise ValueError
+    except (InvalidOperation, ValueError):
+        return JsonResponse({"error": "Tipo de cambio inválido"}, status=400)
+
+    # Recalcular monto en CLP con el nuevo TC
+    if mov.monto_moneda_orig:
+        mov.monto = mov.monto_moneda_orig * tc_decimal
+    mov.tipo_cambio = tc_decimal
+    mov.save(update_fields=['tipo_cambio', 'monto'])
+
+    return JsonResponse({
+        "ok":          True,
+        "movimiento_id": str(mov.id),
+        "tipo_cambio": float(tc_decimal),
+        "monto_clp":   float(mov.monto),
+        "mensaje":     "Tipo de cambio actualizado. El monto en CLP fue recalculado.",
+    })

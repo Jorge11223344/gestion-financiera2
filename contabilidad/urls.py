@@ -38,6 +38,9 @@ urlpatterns = [
     path('api/banco/importaciones', views_banco.historial_importaciones, name='banco_importaciones'),
     path('api/banco/revertir/<str:importacion_id>', views_banco.revertir_importacion, name='banco_revertir'),
 
+    # Tipo de cambio
+    path('api/tipo-cambio', views_banco.tipo_cambio, name='tipo_cambio'),
+
     # Revisión manual
     path('api/revision/pendientes', views_banco.revision_pendientes, name='revision_pendientes'),
     path('api/movimientos/<str:mov_id>/clasificar', views_banco.clasificar_movimiento_view, name='clasificar_movimiento'),

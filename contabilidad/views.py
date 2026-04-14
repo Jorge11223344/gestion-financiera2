@@ -228,17 +228,32 @@ def dashboard_data(request):
     def _v(v):
         return int(v) if isinstance(v, Decimal) else v
 
+    # Resumen multimoneda para el dashboard
+    saldo_usd_orig = sum(c['saldo'] for c in saldos_cta if c['moneda'] == 'USD')
+    saldo_eur_orig = sum(c['saldo'] for c in saldos_cta if c['moneda'] == 'EUR')
+    tc_usd = next((c['tipo_cambio'] for c in saldos_cta if c['moneda'] == 'USD'), None)
+    tc_eur = next((c['tipo_cambio'] for c in saldos_cta if c['moneda'] == 'EUR'), None)
+    hay_tc_estimado = any(c.get('tc_estimado') for c in saldos_cta)
+
     return JsonResponse({
-        'resumen':           {k: _v(v) for k, v in resumen.items()},
-        'kpis':              kpis,
-        'flujo_mensual':     flujo,
-        'ventas_por_dia':    ventas_dia,
+        'resumen':             {k: _v(v) for k, v in resumen.items()},
+        'kpis':                kpis,
+        'flujo_mensual':       flujo,
+        'ventas_por_dia':      ventas_dia,
         'distribucion_gastos': dist_gastos,
-        'saldo_actual':      int(saldo_actual),
-        'saldos_por_cuenta': saldos_cta,
-        'sin_clasificar':    sin_clasificar,
+        'saldo_actual':        int(saldo_actual),
+        'saldos_por_cuenta':   saldos_cta,
+        'saldo_multimoneda': {
+            'total_clp':       int(saldo_actual),
+            'usd_saldo':       round(saldo_usd_orig, 2) if saldo_usd_orig else None,
+            'usd_tipo_cambio': float(tc_usd) if tc_usd else None,
+            'eur_saldo':       round(saldo_eur_orig, 2) if saldo_eur_orig else None,
+            'eur_tipo_cambio': float(tc_eur) if tc_eur else None,
+            'tc_es_estimado':  hay_tc_estimado,
+        },
+        'sin_clasificar':      sin_clasificar,
         'ultimos_movimientos': ultimos_data,
-        'periodo':           {'desde': str(fecha_desde), 'hasta': str(fecha_hasta)},
+        'periodo':             {'desde': str(fecha_desde), 'hasta': str(fecha_hasta)},
     })
 
 
