@@ -29,13 +29,13 @@ def index(request):
 @require_http_methods(["GET", "POST"])
 def movimientos(request):
     if request.method == 'GET':
-        fecha_desde  = request.GET.get('desde')
-        fecha_hasta  = request.GET.get('hasta')
-        tipo         = request.GET.get('tipo')
-        categoria    = request.GET.get('categoria')
-        cuenta_id    = request.GET.get('cuenta_financiera')
-        solo_intern  = request.GET.get('internos')   # '0' | '1'
-        limit        = int(request.GET.get('limit', 100))
+        fecha_desde = request.GET.get('desde')
+        fecha_hasta = request.GET.get('hasta')
+        tipo        = request.GET.get('tipo')
+        categoria   = request.GET.get('categoria')
+        cuenta_id   = request.GET.get('cuenta_financiera')
+        solo_intern = request.GET.get('internos')
+        limit       = int(request.GET.get('limit', 100))
 
         qs = MovimientoDiario.objects.select_related('cuenta_financiera')
         if fecha_desde:
@@ -57,32 +57,34 @@ def movimientos(request):
 
         _cat_map = dict(MovimientoDiario.CATEGORIAS_NORM)
         data = [{
-            'id':                   str(m.id),
-            'fecha':                str(m.fecha),
-            'tipo':                 m.tipo,
-            'tipo_display':         m.get_tipo_display(),
-            'descripcion':          m.descripcion,
-            'monto':                float(m.monto),
-            'moneda':               m.moneda,
-            'monto_moneda_orig':    float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
-            'tipo_cambio':          float(m.tipo_cambio) if m.tipo_cambio else None,
-            'medio_pago':           m.medio_pago,
-            'medio_pago_display':   m.get_medio_pago_display(),
-            'categoria_normalizada':m.categoria_normalizada,
-            'categoria_display':    _cat_map.get(m.categoria_normalizada, m.categoria_normalizada),
-            'tercero':              m.tercero,
+            'id':                    str(m.id),
+            'fecha':                 str(m.fecha),
+            'tipo':                  m.tipo,
+            'tipo_display':          m.get_tipo_display(),
+            'descripcion':           m.descripcion,
+            # monto es siempre monto_base_clp
+            'monto':                 float(m.monto),
+            'moneda':                m.moneda,
+            # monto en moneda original (para mostrar "USD 1.234" al lado)
+            'monto_moneda_orig':     float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
+            'tipo_cambio':           float(m.tipo_cambio) if m.tipo_cambio else None,
+            'medio_pago':            m.medio_pago,
+            'medio_pago_display':    m.get_medio_pago_display(),
+            'categoria_normalizada': m.categoria_normalizada,
+            'categoria_display':     _cat_map.get(m.categoria_normalizada, m.categoria_normalizada),
+            'tercero':               m.tercero,
             'es_transferencia_interna': m.es_transferencia_interna,
-            'afecta_resultado':     m.afecta_resultado,
-            'cuenta_financiera':    str(m.cuenta_financiera) if m.cuenta_financiera else None,
-            'cuenta_financiera_id': str(m.cuenta_financiera_id) if m.cuenta_financiera_id else None,
-            'referencia_externa':   m.referencia_externa,
-            'cantidad_documentos':  m.cantidad_documentos,
-            'rut_contraparte':      m.rut_contraparte,
-            'nombre_contraparte':   m.nombre_contraparte,
-            'monto_neto':           float(m.monto_neto) if m.monto_neto else None,
-            'monto_iva':            float(m.monto_iva)  if m.monto_iva  else None,
-            'notas':                m.notas,
-            'es_ingreso':           m.es_ingreso,
+            'afecta_resultado':      m.afecta_resultado,
+            'cuenta_financiera':     str(m.cuenta_financiera) if m.cuenta_financiera else None,
+            'cuenta_financiera_id':  str(m.cuenta_financiera_id) if m.cuenta_financiera_id else None,
+            'referencia_externa':    m.referencia_externa,
+            'cantidad_documentos':   m.cantidad_documentos,
+            'rut_contraparte':       m.rut_contraparte,
+            'nombre_contraparte':    m.nombre_contraparte,
+            'monto_neto':            float(m.monto_neto) if m.monto_neto else None,
+            'monto_iva':             float(m.monto_iva)  if m.monto_iva  else None,
+            'notas':                 m.notas,
+            'es_ingreso':            m.es_ingreso,
         } for m in qs]
 
         return JsonResponse({'movimientos': data, 'total': len(data)})
@@ -113,7 +115,6 @@ def movimientos(request):
     if body.get('monto_iva'):
         monto_iva = Decimal(str(body['monto_iva']))
 
-    # Cuenta financiera opcional
     cuenta = None
     if body.get('cuenta_financiera_id'):
         from .models import CuentaFinanciera
@@ -122,25 +123,42 @@ def movimientos(request):
         except CuentaFinanciera.DoesNotExist:
             pass
 
+    # Para movimientos manuales: si la cuenta es en moneda extranjera y viene tipo_cambio,
+    # guardamos monto_moneda_orig = monto ingresado y monto = monto × TC (monto_base_clp)
+    moneda_mov  = cuenta.moneda if cuenta else 'CLP'
+    tipo_cambio = None
+    monto_orig  = None
+    monto_clp   = monto
+
+    if moneda_mov != 'CLP' and body.get('tipo_cambio'):
+        try:
+            tipo_cambio = Decimal(str(body['tipo_cambio']))
+            monto_orig  = monto
+            monto_clp   = monto * tipo_cambio
+        except (InvalidOperation, ValueError):
+            pass
+
     m = MovimientoDiario.objects.create(
-        fecha=body['fecha'],
-        tipo=body['tipo'],
-        descripcion=body['descripcion'],
-        monto=monto,
-        medio_pago=body.get('medio_pago', 'efectivo'),
-        cantidad_documentos=body.get('cantidad_documentos'),
-        rut_contraparte=body.get('rut_contraparte', ''),
-        nombre_contraparte=body.get('nombre_contraparte', ''),
-        monto_neto=monto_neto,
-        monto_iva=monto_iva,
-        notas=body.get('notas', ''),
-        cuenta_financiera=cuenta,
-        moneda=cuenta.moneda if cuenta else 'CLP',
+        fecha               = body['fecha'],
+        tipo                = body['tipo'],
+        descripcion         = body['descripcion'],
+        monto               = monto_clp,          # siempre monto_base_clp
+        medio_pago          = body.get('medio_pago', 'efectivo'),
+        cantidad_documentos = body.get('cantidad_documentos'),
+        rut_contraparte     = body.get('rut_contraparte', ''),
+        nombre_contraparte  = body.get('nombre_contraparte', ''),
+        monto_neto          = monto_neto,
+        monto_iva           = monto_iva,
+        notas               = body.get('notas', ''),
+        cuenta_financiera   = cuenta,
+        moneda              = moneda_mov,
+        monto_moneda_orig   = monto_orig,
+        tipo_cambio         = tipo_cambio,
     )
 
     return JsonResponse({
-        'id': str(m.id),
-        'mensaje': 'Movimiento registrado exitosamente',
+        'id':         str(m.id),
+        'mensaje':    'Movimiento registrado exitosamente',
         'monto_neto': int(monto_neto) if monto_neto else None,
         'monto_iva':  int(monto_iva)  if monto_iva  else None,
     }, status=201)
@@ -163,6 +181,8 @@ def movimiento_detalle(request, mov_id):
             'descripcion':           m.descripcion,
             'monto':                 float(m.monto),
             'moneda':                m.moneda,
+            'monto_moneda_orig':     float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
+            'tipo_cambio':           float(m.tipo_cambio) if m.tipo_cambio else None,
             'categoria_normalizada': m.categoria_normalizada,
             'tercero':               m.tercero,
             'es_transferencia_interna': m.es_transferencia_interna,
@@ -174,14 +194,40 @@ def movimiento_detalle(request, mov_id):
         m.delete()
         return JsonResponse({'mensaje': 'Eliminado'})
 
-    # PUT
-    body = json.loads(request.body)
-    campos = ['fecha', 'tipo', 'descripcion', 'monto', 'medio_pago', 'notas',
-              'cantidad_documentos', 'rut_contraparte', 'nombre_contraparte',
-              'categoria_normalizada', 'tercero', 'es_transferencia_interna']
-    for field in campos:
+    # ── PUT: editar movimiento ──
+    # BUG CORREGIDO: antes el PUT solo guardaba los campos nuevos pero
+    # NO recalculaba monto_base_clp si cambiaban monto o tipo_cambio.
+    # Ahora recalcula correctamente.
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    campos_simples = ['fecha', 'tipo', 'descripcion', 'medio_pago', 'notas',
+                      'cantidad_documentos', 'rut_contraparte', 'nombre_contraparte',
+                      'categoria_normalizada', 'tercero', 'es_transferencia_interna']
+    for field in campos_simples:
         if field in body:
             setattr(m, field, body[field])
+
+    # Recalcular monto_base_clp si cambia monto o tipo_cambio
+    if 'monto' in body or 'tipo_cambio' in body:
+        nuevo_monto = Decimal(str(body.get('monto', float(m.monto_moneda_orig or m.monto))))
+        nuevo_tc    = Decimal(str(body.get('tipo_cambio', float(m.tipo_cambio or 1))))
+
+        if m.moneda != 'CLP' and nuevo_tc > 1:
+            m.monto_moneda_orig = nuevo_monto
+            m.tipo_cambio       = nuevo_tc
+            m.monto             = nuevo_monto * nuevo_tc   # recalcular monto_base_clp
+        else:
+            m.monto = nuevo_monto
+
+        # Recalcular IVA si aplica
+        if m.tipo in ['suma_facturas_emitidas', 'suma_facturas_recibidas']:
+            info      = calcular_iva(m.monto)
+            m.monto_neto = info['neto']
+            m.monto_iva  = info['iva']
+
     m.save()
     return JsonResponse({'mensaje': 'Actualizado'})
 
@@ -191,7 +237,7 @@ def movimiento_detalle(request, mov_id):
 # ──────────────────────────────────────────────
 
 def dashboard_data(request):
-    hoy = date.today()
+    hoy         = date.today()
     fecha_desde = date(hoy.year, hoy.month, 1)
     fecha_hasta = hoy
 
@@ -200,13 +246,13 @@ def dashboard_data(request):
     if request.GET.get('hasta'):
         fecha_hasta = date.fromisoformat(request.GET['hasta'])
 
-    resumen      = get_resumen_periodo(fecha_desde, fecha_hasta)
-    kpis         = get_kpis_salud(fecha_desde, fecha_hasta)
-    flujo        = get_flujo_mensual(hoy.year)
-    ventas_dia   = get_ventas_por_dia(fecha_desde, fecha_hasta)
-    dist_gastos  = get_distribucion_gastos(fecha_desde, fecha_hasta)
-    saldo_actual = get_saldo_actual()
-    saldos_cta   = get_saldo_por_cuenta()
+    resumen     = get_resumen_periodo(fecha_desde, fecha_hasta)
+    kpis        = get_kpis_salud(fecha_desde, fecha_hasta)
+    flujo       = get_flujo_mensual(hoy.year)
+    ventas_dia  = get_ventas_por_dia(fecha_desde, fecha_hasta)
+    dist_gastos = get_distribucion_gastos(fecha_desde, fecha_hasta)
+    saldo_actual= get_saldo_actual()
+    saldos_cta  = get_saldo_por_cuenta()
 
     sin_clasificar = MovimientoDiario.objects.filter(
         categoria_normalizada='sin_clasificar'
@@ -214,26 +260,27 @@ def dashboard_data(request):
 
     ultimos = MovimientoDiario.objects.select_related('cuenta_financiera').all()[:10]
     ultimos_data = [{
-        'fecha':            str(m.fecha),
-        'tipo_display':     m.get_tipo_display(),
-        'descripcion':      m.descripcion,
-        'monto':            float(m.monto),
-        'moneda':           m.moneda,
-        'es_ingreso':       m.es_ingreso,
-        'es_transferencia_interna': m.es_transferencia_interna,
-        'categoria_normalizada':    m.categoria_normalizada,
-        'cuenta':           str(m.cuenta_financiera) if m.cuenta_financiera else None,
+        'fecha':                   str(m.fecha),
+        'tipo_display':            m.get_tipo_display(),
+        'descripcion':             m.descripcion,
+        'monto':                   float(m.monto),
+        'moneda':                  m.moneda,
+        'monto_moneda_orig':       float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
+        'tipo_cambio':             float(m.tipo_cambio) if m.tipo_cambio else None,
+        'es_ingreso':              m.es_ingreso,
+        'es_transferencia_interna':m.es_transferencia_interna,
+        'categoria_normalizada':   m.categoria_normalizada,
+        'cuenta':                  str(m.cuenta_financiera) if m.cuenta_financiera else None,
     } for m in ultimos]
 
     def _v(v):
         return int(v) if isinstance(v, Decimal) else v
 
-    # Resumen multimoneda para el dashboard
+    # Resumen multimoneda para el panel de saldos
     saldo_usd_orig = sum(c['saldo'] for c in saldos_cta if c['moneda'] == 'USD')
     saldo_eur_orig = sum(c['saldo'] for c in saldos_cta if c['moneda'] == 'EUR')
     tc_usd = next((c['tipo_cambio'] for c in saldos_cta if c['moneda'] == 'USD'), None)
     tc_eur = next((c['tipo_cambio'] for c in saldos_cta if c['moneda'] == 'EUR'), None)
-    hay_tc_estimado = any(c.get('tc_estimado') for c in saldos_cta)
 
     return JsonResponse({
         'resumen':             {k: _v(v) for k, v in resumen.items()},
@@ -242,14 +289,14 @@ def dashboard_data(request):
         'ventas_por_dia':      ventas_dia,
         'distribucion_gastos': dist_gastos,
         'saldo_actual':        int(saldo_actual),
-        'saldos_por_cuenta':   saldos_cta,
+        'saldos_por_cuenta':   saldos_cta,          # incluye saldo (orig) + saldo_clp
         'saldo_multimoneda': {
             'total_clp':       int(saldo_actual),
             'usd_saldo':       round(saldo_usd_orig, 2) if saldo_usd_orig else None,
             'usd_tipo_cambio': float(tc_usd) if tc_usd else None,
             'eur_saldo':       round(saldo_eur_orig, 2) if saldo_eur_orig else None,
             'eur_tipo_cambio': float(tc_eur) if tc_eur else None,
-            'tc_es_estimado':  hay_tc_estimado,
+            'tc_estimado':     any(c.get('tc_estimado') for c in saldos_cta),
         },
         'sin_clasificar':      sin_clasificar,
         'ultimos_movimientos': ultimos_data,
@@ -267,10 +314,10 @@ def resumen_mensual(request, anio, mes):
     ventas_dia  = get_ventas_por_dia(fecha_desde, fecha_hasta)
 
     return JsonResponse({
-        'anio':       anio,
-        'mes':        mes,
-        'mes_nombre': calendar.month_name[mes],
-        'resumen':    {k: int(v) if isinstance(v, Decimal) else v for k, v in resumen.items()},
+        'anio':      anio,
+        'mes':       mes,
+        'mes_nombre':calendar.month_name[mes],
+        'resumen':   {k: int(v) if isinstance(v, Decimal) else v for k, v in resumen.items()},
         'distribucion_gastos': dist_gastos,
         'ventas_por_dia':      ventas_dia,
     })
@@ -285,7 +332,7 @@ def resumen_mensual(request, anio, mes):
 def cierres(request):
     if request.method == 'GET':
         limit = int(request.GET.get('limit', 30))
-        cs = CierreDiario.objects.all()[:limit]
+        cs    = CierreDiario.objects.all()[:limit]
         return JsonResponse({'cierres': [{
             'fecha':             str(c.fecha),
             'saldo_inicial_caja':int(c.saldo_inicial_caja),
@@ -304,7 +351,6 @@ def cierres(request):
     tipos_ingreso = ['ingreso_caja', 'ingreso_banco', 'suma_boletas',
                      'suma_facturas_emitidas', 'prestamo_recibido', 'otro_ingreso']
 
-    # Excluir transferencias internas del cierre
     movs_dia = MovimientoDiario.objects.filter(
         fecha=fecha, es_transferencia_interna=False
     ).exclude(categoria_normalizada__in=['transferencia_interna', 'conversion_divisa'])
@@ -312,8 +358,8 @@ def cierres(request):
     ingresos = movs_dia.filter(tipo__in=tipos_ingreso).aggregate(t=Sum('monto'))['t'] or Decimal('0')
     egresos  = movs_dia.exclude(tipo__in=tipos_ingreso).aggregate(t=Sum('monto'))['t'] or Decimal('0')
 
-    cierre_ant  = CierreDiario.objects.filter(fecha__lt=fecha).first()
-    saldo_inic  = cierre_ant.saldo_final_caja if cierre_ant else Decimal('0')
+    cierre_ant = CierreDiario.objects.filter(fecha__lt=fecha).first()
+    saldo_inic = cierre_ant.saldo_final_caja if cierre_ant else Decimal('0')
 
     cierre, _ = CierreDiario.objects.update_or_create(
         fecha=fecha,
@@ -375,13 +421,13 @@ def configuracion(request):
     config = ConfiguracionEmpresa.get()
     if request.method == 'GET':
         return JsonResponse({
-            'nombre':           config.nombre,
-            'rut':              config.rut,
-            'giro':             config.giro,
-            'direccion':        config.direccion,
-            'telefono':         config.telefono,
-            'email':            config.email,
-            'moneda':           config.moneda,
+            'nombre':              config.nombre,
+            'rut':                 config.rut,
+            'giro':                config.giro,
+            'direccion':           config.direccion,
+            'telefono':            config.telefono,
+            'email':               config.email,
+            'moneda':              config.moneda,
             'saldo_inicial_caja':  int(config.saldo_inicial_caja),
             'saldo_inicial_banco': int(config.saldo_inicial_banco),
             'fecha_inicio_operaciones': str(config.fecha_inicio_operaciones)

@@ -1394,6 +1394,8 @@ async function guardarMovimiento() {
   if (data.monto_neto) msg += ` | Neto: ${fmt(data.monto_neto)} | IVA: ${fmt(data.monto_iva)}`;
   showToast(msg);
   limpiarFormMovimiento();
+  // CORREGIDO: refrescar dashboard para reflejar el nuevo movimiento
+  cargarDashboard();
 }
 
 function limpiarFormMovimiento() {
@@ -1580,6 +1582,8 @@ async function guardarClasificacion() {
     }
     renderMovimientos();
     if (typeof cargarRevision === 'function') cargarRevision();
+    // CORREGIDO: cambiar categoría afecta P&L (ej: sin_clasificar → pago_proveedor)
+    cargarDashboard();
   } else {
     showToast('Error: ' + (data.error || ''), 'error');
   }
@@ -1597,6 +1601,8 @@ async function confirmarEliminar() {
   showToast('Movimiento eliminado');
   movToDelete = null;
   cargarMovimientos();
+  // CORREGIDO: refrescar dashboard para reflejar el cambio en P&L y saldos
+  cargarDashboard();
 }
 
 // ─────────────────────────────────────────────────────────
