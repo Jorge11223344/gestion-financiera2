@@ -92,6 +92,31 @@ def _monto_clp(movimiento) -> Decimal:
     return Decimal(str(movimiento.monto or 0))
 
 
+def _monto_clp_robusto(movimiento) -> Decimal:
+    """
+    Para movimientos en moneda extranjera, intenta reconstruir CLP desde
+    monto_moneda_orig * tipo_cambio cuando el monto guardado parezca venir
+    aún en moneda original.
+    """
+    monto = Decimal(str(movimiento.monto or 0))
+    moneda = getattr(movimiento, 'moneda', 'CLP') or 'CLP'
+    monto_orig = getattr(movimiento, 'monto_moneda_orig', None)
+    tc = getattr(movimiento, 'tipo_cambio', None)
+
+    if moneda != 'CLP' and monto_orig not in (None, '') and tc not in (None, ''):
+        try:
+            monto_orig_d = Decimal(str(monto_orig))
+            tc_d = Decimal(str(tc))
+            reconstruido = monto_orig_d * tc_d
+            # Si el monto guardado es demasiado pequeño respecto al reconstruido,
+            # asumimos que quedó grabado en moneda original.
+            if reconstruido > 0 and (monto <= (reconstruido / Decimal('10'))):
+                return reconstruido
+        except Exception:
+            pass
+    return monto
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Resumen del período (P&L)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,8 +223,8 @@ def get_flujo_mensual(anio, meses=12):
         movs = _qs_operacional(
             MovimientoDiario.objects.filter(fecha__year=anio, fecha__month=mes)
         )
-        ingresos = movs.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-        egresos = movs.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+        ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+        egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
         resultado.append({
             'mes': mes,
             'mes_nombre': calendar.month_abbr[mes],
@@ -421,7 +446,7 @@ def get_detalle_saldos_cuentas(limit_movimientos=25):
             signo = '↔' if efecto == 'neutro' else ('+' if efecto == 'suma' else '-')
 
             monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = Decimal(str(m.monto or 0))
+            monto_clp = _monto_clp_robusto(m)
 
             movimientos_detalle.append({
                 'id': str(m.id),
@@ -445,7 +470,7 @@ def get_detalle_saldos_cuentas(limit_movimientos=25):
                 continue
 
             monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = Decimal(str(m.monto or 0))
+            monto_clp = _monto_clp_robusto(m)
 
             if m.tipo in _TIPOS_INGRESO:
                 ingresos_orig += Decimal(str(monto_orig or 0))
@@ -501,15 +526,15 @@ def get_saldo_actual():
     config = ConfiguracionEmpresa.get()
 
     movs_sin_cuenta = MovimientoDiario.objects.filter(cuenta_financiera__isnull=True)
-    ing_sc = movs_sin_cuenta.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-    egr_sc = movs_sin_cuenta.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    ing_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+    egr_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
     saldo_legacy = config.saldo_inicial_caja + config.saldo_inicial_banco + ing_sc - egr_sc
 
     saldo_cuentas = Decimal('0')
     for cuenta in CuentaFinanciera.objects.filter(activa=True):
         movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
-        ingresos = movs.filter(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
-        egresos = movs.exclude(tipo__in=_TIPOS_INGRESO).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+        ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+        egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
 
         if cuenta.moneda == 'CLP':
             saldo_inicial_clp = cuenta.saldo_inicial
@@ -555,7 +580,7 @@ def get_saldo_por_cuenta():
                 continue
 
             monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = Decimal(str(m.monto or 0))
+            monto_clp = _monto_clp_robusto(m)
 
             if m.tipo in _TIPOS_INGRESO:
                 ingresos_orig += Decimal(str(monto_orig or 0))

@@ -32,6 +32,10 @@ class FilaCartola:
     documento: str = ""
     tipo_banco: str = ""    # columna "Tipo" nativa del banco (útil en Global66)
     fila_origen: int = 0
+    moneda: str = "CLP"
+    tipo_cambio: Optional[Decimal] = None
+    tercero: str = ""
+    pais: str = ""
 
 
 @dataclass
@@ -156,8 +160,8 @@ MAPA_GLOBAL66 = {
     "abono":                  "ingreso_banco",
     "deposito":               "ingreso_banco",
     "depósito":               "ingreso_banco",
-    "conversion de divisas":  "ingreso_banco",
-    "conversión de divisas":  "ingreso_banco",
+    "conversion de divisas":  "conversion_divisa",
+    "conversión de divisas":  "conversion_divisa",
     "transferencia enviada":  "egreso_banco",
     "cargo":                  "egreso_banco",
     "retiro":                 "egreso_banco",
@@ -203,8 +207,8 @@ def clasificar_global66(tipo_banco: str, descripcion: str, es_cargo: bool) -> Op
 #           | DNI | N° cuenta | País | Tipo de cambio | ID transacción | Comentario
 
 MAPA_TIPO_GLOBAL66_XLSX = {
-    "conversión de divisas":        "ingreso_banco",   # abono en cuenta destino
-    "conversion de divisas":        "ingreso_banco",
+    "conversión de divisas":        "conversion_divisa",
+    "conversion de divisas":        "conversion_divisa",
     "intereses abonados":           "otro_ingreso",
     "envío a cuenta bancaria":      "egreso_banco",
     "envio a cuenta bancaria":      "egreso_banco",
@@ -214,25 +218,29 @@ MAPA_TIPO_GLOBAL66_XLSX = {
 }
 
 
-def _clasificar_tipo_global66_xlsx(tipo: str, tiene_debito: bool) -> str:
-    t = tipo.lower().strip()
-    # Envíos a terceros (remuneraciones, proveedores, etc.)
-    if t.startswith("envío a") or t.startswith("envio a"):
-        desc = t
-        if any(p in desc for p in ["segucargo", "flete", "transporte", "logistica", "logística"]):
-            return "egreso_banco"
-        return "egreso_banco"
-    # Recibido de alguien → ingreso
+def _clasificar_tipo_global66_xlsx(tipo: str, tiene_debito: bool, nombre_tercero: str = "", comentario: str = "") -> str:
+    t = (tipo or "").lower().strip()
+    tercero = (nombre_tercero or "").lower().strip()
+    comentario = (comentario or "").lower().strip()
+
     if t.startswith("recibido de"):
+        if "jimacomex" in tercero or "jimacomex" in comentario:
+            return "transferencia_interna"
         return "ingreso_banco"
-    # Compra con tarjeta
+
+    if "conversión de divisas" in t or "conversion de divisas" in t:
+        return "conversion_divisa"
+
+    if t.startswith("envío a") or t.startswith("envio a"):
+        return "egreso_banco"
+
     if t.startswith("compra en"):
         return "egreso_banco"
-    # Buscar en mapa exacto
+
     for clave, tipo_mov in MAPA_TIPO_GLOBAL66_XLSX.items():
         if t == clave or t.startswith(clave):
             return tipo_mov
-    # Fallback por dirección del dinero
+
     return "egreso_banco" if tiene_debito else "ingreso_banco"
 
 
@@ -323,6 +331,9 @@ def _parsear_global66_xlsx(archivo_bytes: bytes) -> ResultadoImportacion:
         nombre_tercero    = vals[7].strip() if len(vals) > 7 else ""
         comentario        = vals[13].strip() if len(vals) > 13 else ""
         id_transaccion    = vals[12].strip() if len(vals) > 12 else ""
+        pais              = vals[10].strip() if len(vals) > 10 else ""
+        tc_str            = vals[11].strip() if len(vals) > 11 else ""
+        tipo_cambio       = parse_monto(tc_str) if tc_str else None
 
         cargo = parse_monto(monto_debito_str)
         abono = parse_monto(monto_credito_str)
@@ -331,7 +342,7 @@ def _parsear_global66_xlsx(archivo_bytes: bytes) -> ResultadoImportacion:
             continue
 
         tiene_debito = cargo > 0
-        tipo_mov = _clasificar_tipo_global66_xlsx(tipo_transaccion, tiene_debito)
+        tipo_mov = _clasificar_tipo_global66_xlsx(tipo_transaccion, tiene_debito, nombre_tercero, comentario)
 
         # Construir descripción legible
         if nombre_tercero:
@@ -351,6 +362,10 @@ def _parsear_global66_xlsx(archivo_bytes: bytes) -> ResultadoImportacion:
             documento=id_transaccion,
             tipo_banco=tipo_transaccion,
             fila_origen=i,
+            moneda=moneda,
+            tipo_cambio=tipo_cambio if tipo_cambio and tipo_cambio > 0 else None,
+            tercero=nombre_tercero,
+            pais=pais,
         ))
 
     resultado.total_filas_validas = len(resultado.filas)
@@ -800,6 +815,9 @@ REGLAS_CLASIFICACION = [
 
 
 def clasificar_movimiento(descripcion: str, es_cargo: bool, tipo_banco: str = "") -> Optional[str]:
+    tb = (tipo_banco or "").lower().strip()
+    if tb in ("conversion_divisa", "transferencia_interna"):
+        return tb
     if tipo_banco:
         resultado = clasificar_global66(tipo_banco, descripcion, es_cargo)
         if resultado is not None:
@@ -816,30 +834,59 @@ def clasificar_movimiento(descripcion: str, es_cargo: bool, tipo_banco: str = ""
 def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
     """
     Convierte las filas parseadas en dicts listos para guardar en MovimientoDiario.
-    Incluye tipo_banco, referencia_externa y es_cargo para que el clasificador
-    del servicio externo pueda usarlos.
+    - monto: SIEMPRE en CLP
+    - monto_moneda_orig: valor en moneda de la cuenta
+    - tipo_cambio: TC usado al importar o estimado
     """
     movimientos = []
     for fila in resultado.filas:
         es_cargo = fila.cargo > 0
         tipo = clasificar_movimiento(fila.descripcion, es_cargo, fila.tipo_banco)
         if tipo is None:
-            continue  # fila ignorada (ej: saldo inicial)
+            continue
 
-        monto = fila.cargo if es_cargo else fila.abono
-        nota_doc  = f" | Doc: {fila.documento}" if fila.documento else ""
+        monto_orig = fila.cargo if es_cargo else fila.abono
+        moneda = getattr(fila, "moneda", "CLP") or "CLP"
+        tipo_cambio = getattr(fila, "tipo_cambio", None)
+        if moneda != "CLP":
+            tc = tipo_cambio if tipo_cambio and tipo_cambio > 0 else Decimal("950")
+            monto_clp = monto_orig * tc
+        else:
+            tc = Decimal("1")
+            monto_clp = monto_orig
+
+        categoria_normalizada = "sin_clasificar"
+        es_transferencia_interna = False
+        if tipo == "conversion_divisa":
+            categoria_normalizada = "conversion_divisa"
+            es_transferencia_interna = True
+            tipo = "egreso_banco" if es_cargo else "ingreso_banco"
+        elif tipo == "transferencia_interna":
+            categoria_normalizada = "transferencia_interna"
+            es_transferencia_interna = True
+            tipo = "egreso_banco" if es_cargo else "ingreso_banco"
+
+        nota_doc = f" | Doc: {fila.documento}" if fila.documento else ""
         nota_tipo = f" | Tipo: {fila.tipo_banco}" if fila.tipo_banco else ""
+        nota_moneda = f" | Moneda: {moneda}"
+        nota_tc = f" | TC: {tc}" if tc else ""
 
         movimientos.append({
             "fecha": fila.fecha,
             "tipo": tipo,
             "descripcion": fila.descripcion[:250],
-            "monto": monto,
+            "monto": monto_clp,
+            "monto_moneda_orig": monto_orig,
+            "moneda": moneda,
+            "tipo_cambio": tc,
             "es_cargo": es_cargo,
             "medio_pago": "transferencia",
-            "notas": f"Importado desde {resultado.banco_detectado}{nota_tipo}{nota_doc}",
-            # Campos extra para el clasificador y trazabilidad
+            "categoria_normalizada": categoria_normalizada,
+            "es_transferencia_interna": es_transferencia_interna,
+            "notas": f"Importado desde {resultado.banco_detectado}{nota_tipo}{nota_doc}{nota_moneda}{nota_tc}",
             "tipo_banco": fila.tipo_banco,
             "referencia_externa": fila.documento[:100] if fila.documento else "",
+            "tercero": getattr(fila, "tercero", "")[:200],
+            "pais_tercero": getattr(fila, "pais", "")[:5],
         })
     return movimientos

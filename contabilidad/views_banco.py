@@ -164,6 +164,10 @@ def preview_cartola(request):
         mov["posible_duplicado"] = existe.exists()
         mov["fecha"] = str(mov["fecha"])
         mov["monto"] = float(mov["monto"])
+        if mov.get("monto_moneda_orig") is not None:
+            mov["monto_moneda_orig"] = float(mov["monto_moneda_orig"])
+        if mov.get("tipo_cambio") is not None:
+            mov["tipo_cambio"] = float(mov["tipo_cambio"])
 
     # Estadísticas del preview
     movs_reales = [m for m in movimientos_propuestos if not m.get("es_transferencia_interna")]
@@ -252,17 +256,13 @@ def confirmar_importacion(request):
             continue
 
         try:
-            monto = Decimal(str(mov["monto"]))
-            moneda_mov = moneda_cuenta
-
-            # Si el monto original viene en moneda extranjera
-            monto_clp = monto
-            monto_orig = None
-            tipo_cambio = None
-            if moneda_cuenta == "USD" and mov.get("tipo_cambio"):
-                tipo_cambio = Decimal(str(mov["tipo_cambio"]))
-                monto_orig = monto
-                monto_clp = monto * tipo_cambio
+            # Desde el importador, mov["monto"] ya viene SIEMPRE en CLP.
+            monto_clp = Decimal(str(mov["monto"]))
+            moneda_mov = mov.get("moneda") or moneda_cuenta or "CLP"
+            monto_orig = mov.get("monto_moneda_orig")
+            monto_orig = Decimal(str(monto_orig)) if monto_orig not in (None, "", "null") else None
+            tipo_cambio = mov.get("tipo_cambio")
+            tipo_cambio = Decimal(str(tipo_cambio)) if tipo_cambio not in (None, "", "null") else None
 
             obj = MovimientoDiario.objects.create(
                 fecha=mov["fecha"],
@@ -281,6 +281,7 @@ def confirmar_importacion(request):
                 es_transferencia_interna=mov.get("es_transferencia_interna", False),
                 categoria_normalizada=mov.get("categoria_normalizada", "sin_clasificar"),
                 tercero=mov.get("tercero", "")[:200],
+                pais_tercero=mov.get("pais_tercero", "")[:5],
                 clasificacion_confianza=mov.get("clasificacion_confianza", ""),
                 clasificacion_razon=mov.get("clasificacion_razon", "")[:250],
             )

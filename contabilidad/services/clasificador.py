@@ -44,6 +44,7 @@ _RECIBIDO_APORTE = [
     "munoz", "muñoz", "acuna", "acuña", "jorge", "ivan", "socio",
     "dueño", "dueno", "propietario",
 ]
+_PROPIOS = ["jimacomex", "arenita"]
 
 # Reglas para Banco de Chile (por descripción)
 _REGLAS_BCH_DESC = [
@@ -133,6 +134,9 @@ def clasificar_movimiento(
         nombre_orig = m.group(1).strip()
         tercero = nombre_orig.title()
         d = nombre_orig.lower()
+        if any(p in d for p in _PROPIOS):
+            return {"categoria_normalizada": "transferencia_interna", "es_transferencia_interna": True,
+                    "confianza": "alta", "razon": "Recibido desde cuenta/empresa propia", "tercero": tercero}
         if any(p in d for p in _RECIBIDO_APORTE) or _es_nombre_persona(nombre_orig):
             return {"categoria_normalizada": "aporte_socio", "es_transferencia_interna": False,
                     "confianza": "media", "razon": "Recibido de persona natural → posible aporte socio", "tercero": tercero}

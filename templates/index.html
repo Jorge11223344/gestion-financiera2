@@ -23,7 +23,7 @@
     --shadow: 0 4px 24px rgba(0,0,0,0.4);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
 
   /* ── Layout ── */
   .app { display: flex; min-height: 100vh; }
@@ -45,8 +45,8 @@
   .nav-item.active { background: var(--bg3); color: var(--accent); border-left-color: var(--accent); }
   .nav-item .icon { font-size: 18px; width: 22px; text-align: center; }
 
-  .main { margin-left: 240px; flex: 1; padding: 28px 32px; min-width: 0; overflow-x: hidden; }
-  .page { display: none; }
+  .main { margin-left: 240px; flex: 1; width: calc(100% - 240px); padding: 28px 32px; min-width: 0; overflow-x: hidden; }
+  .page { display: none; max-width: 100%; }
   .page.active { display: block; }
 
   /* ── Header ── */
@@ -182,6 +182,20 @@
   }
   @media (max-width: 600px) {
     .grid-4 { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 1200px) {
+    .grid-3 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 900px) {
+    #page-asistente-balance > div[style*='grid-template-columns:1fr 380px'] { display:block !important; }
+    #page-asistente-balance > div[style*='grid-template-columns:1fr 380px'] > div:last-child { margin-top:20px; }
+    #page-asistente-balance div[style*='position:sticky;top:20px;'] { position: static !important; top: auto !important; }
+  }
+  @media (max-width: 700px) {
+    #page-revision > div[style*='display:flex;gap:8px;margin-bottom:24px'] { flex-wrap: wrap; }
+    #page-revision .revision-tab { padding: 10px 12px !important; font-size: 13px !important; }
+    .flex-between { flex-direction: column; align-items: flex-start; gap: 12px; }
   }
 
   .loading { text-align: center; padding: 40px; color: var(--text2); }
@@ -838,9 +852,6 @@
   </div>
 </div>
 
-</main>
-</div>
-
 <!-- CUENTAS FINANCIERAS -->
 <div id="page-cuentas-financieras" class="page">
   <div class="page-header">
@@ -897,6 +908,9 @@
       </div>
     </div>
   </div>
+</div>
+
+</main>
 </div>
 
 <!-- Modal Nueva Cuenta -->
