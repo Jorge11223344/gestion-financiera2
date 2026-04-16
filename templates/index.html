@@ -46,7 +46,7 @@
   .nav-item .icon { font-size: 18px; width: 22px; text-align: center; }
 
   .main { margin-left: 240px; flex: 1; padding: 28px 32px; min-width: 0; overflow-x: hidden; }
-  .page { display: none; }
+  .page { display: none; width: 100%; min-width: 0; }
   .page.active { display: block; }
 
   /* ── Header ── */
@@ -58,7 +58,7 @@
   .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
   .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
-  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 24px; }
   .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
   .stat-value { font-size: 24px; font-weight: 700; }
   .stat-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
@@ -133,6 +133,7 @@
   /* ── Filtros ── */
   .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
   .filters input, .filters select { width: auto; }
+  .revision-tabs { display:flex; gap:8px; margin-bottom:24px; border-bottom:1px solid var(--border); padding-bottom:0; flex-wrap:wrap; }
 
   /* ── Período selector ── */
   .periodo-bar {
@@ -173,12 +174,20 @@
   .config-section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 
   /* ── Responsive ── */
+  @media (max-width: 1100px) {
+    .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   @media (max-width: 900px) {
     .sidebar { display: none; }
-    .main { margin-left: 0; padding: 16px; }
+    .main { margin-left: 0; padding: 16px; width: 100%; }
     .grid-4 { grid-template-columns: 1fr 1fr; }
     .grid-2 { grid-template-columns: 1fr; }
     .form-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 700px) {
+    .grid-3 { grid-template-columns: 1fr; }
+    .revision-tabs { flex-direction: column; }
+    .revision-tab { width: 100%; text-align: left; }
   }
   @media (max-width: 600px) {
     .grid-4 { grid-template-columns: 1fr; }
@@ -826,9 +835,6 @@
   </div>
 </div>
 
-</main>
-</div>
-
 <!-- CUENTAS FINANCIERAS -->
 <div id="page-cuentas-financieras" class="page">
   <div class="page-header">
@@ -851,7 +857,7 @@
   </div>
 
   <!-- Tabs -->
-  <div style="display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;">
+  <div class="revision-tabs">
     <button class="revision-tab active" onclick="switchRevisionTab('sin-clasificar', this)" style="padding:10px 18px;background:none;border:none;color:var(--accent);font-size:14px;font-weight:600;border-bottom:2px solid var(--accent);cursor:pointer;">Sin clasificar <span id="badge-sin-clasificar" style="background:var(--red);color:#fff;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
     <button class="revision-tab" onclick="switchRevisionTab('transferencias', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles transferencias internas <span id="badge-transferencias" style="background:var(--yellow);color:#000;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
     <button class="revision-tab" onclick="switchRevisionTab('duplicados', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles duplicados</button>
@@ -885,6 +891,9 @@
       </div>
     </div>
   </div>
+</div>
+
+</main>
 </div>
 
 <!-- Modal Nueva Cuenta -->
