@@ -427,12 +427,23 @@ def clasificar_movimiento_view(request, mov_id):
         return JsonResponse({"error": "JSON inválido"}, status=400)
 
     campos_editables = [
-        'categoria_normalizada', 'es_transferencia_interna',
+        'tipo', 'categoria_normalizada', 'es_transferencia_interna',
         'tercero', 'pais_tercero', 'notas',
     ]
+    campos_validos = {
+        'tipo': {v for v, _ in MovimientoDiario.TIPOS},
+        'categoria_normalizada': {v for v, _ in MovimientoDiario.CATEGORIAS_NORM},
+    }
     for campo in campos_editables:
-        if campo in body:
-            setattr(mov, campo, body[campo])
+        if campo not in body:
+            continue
+        valor = body[campo]
+        if campo in campos_validos and valor not in campos_validos[campo]:
+            return JsonResponse({"error": f"Valor inválido para {campo}"}, status=400)
+        setattr(mov, campo, valor)
+
+    if mov.es_transferencia_interna and mov.categoria_normalizada == 'sin_clasificar':
+        mov.categoria_normalizada = 'transferencia_interna'
 
     # Vincular movimiento relacionado
     rel_id = body.get("movimiento_relacionado_id")

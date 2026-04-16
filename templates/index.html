@@ -46,7 +46,7 @@
   .nav-item .icon { font-size: 18px; width: 22px; text-align: center; }
 
   .main { margin-left: 240px; flex: 1; padding: 28px 32px; min-width: 0; overflow-x: hidden; }
-  .page { display: none; width: 100%; min-width: 0; }
+  .page { display: none; }
   .page.active { display: block; }
 
   /* ── Header ── */
@@ -58,7 +58,7 @@
   .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
   .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
-  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
   .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
   .stat-value { font-size: 24px; font-weight: 700; }
   .stat-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
@@ -133,7 +133,6 @@
   /* ── Filtros ── */
   .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
   .filters input, .filters select { width: auto; }
-  .revision-tabs { display:flex; gap:8px; margin-bottom:24px; border-bottom:1px solid var(--border); padding-bottom:0; flex-wrap:wrap; }
 
   /* ── Período selector ── */
   .periodo-bar {
@@ -174,20 +173,12 @@
   .config-section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 
   /* ── Responsive ── */
-  @media (max-width: 1100px) {
-    .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
   @media (max-width: 900px) {
     .sidebar { display: none; }
-    .main { margin-left: 0; padding: 16px; width: 100%; }
+    .main { margin-left: 0; padding: 16px; }
     .grid-4 { grid-template-columns: 1fr 1fr; }
     .grid-2 { grid-template-columns: 1fr; }
     .form-grid { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 700px) {
-    .grid-3 { grid-template-columns: 1fr; }
-    .revision-tabs { flex-direction: column; }
-    .revision-tab { width: 100%; text-align: left; }
   }
   @media (max-width: 600px) {
     .grid-4 { grid-template-columns: 1fr; }
@@ -330,6 +321,18 @@
       <div class="chart-container"><canvas id="chart-gastos"></canvas></div>
     </div>
   </div>
+
+  <div class="card" style="margin-top:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+      <div>
+        <div class="chart-title" style="margin-bottom:4px;">🔎 Detalle por cuenta</div>
+        <div style="font-size:12px;color:var(--text2);">Muestra cómo se forma el saldo histórico de cada cuenta financiera.</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="toggleDetalleCuentas()" id="btn-toggle-detalle-cuentas">Mostrar detalle</button>
+    </div>
+    <div id="detalle-cuentas-wrap" style="display:none;"></div>
+  </div>
+
   <div class="grid-2">
     <div class="card">
       <div class="chart-title">Ventas / Ingresos por Día</div>
@@ -835,6 +838,9 @@
   </div>
 </div>
 
+</main>
+</div>
+
 <!-- CUENTAS FINANCIERAS -->
 <div id="page-cuentas-financieras" class="page">
   <div class="page-header">
@@ -857,7 +863,7 @@
   </div>
 
   <!-- Tabs -->
-  <div class="revision-tabs">
+  <div style="display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;">
     <button class="revision-tab active" onclick="switchRevisionTab('sin-clasificar', this)" style="padding:10px 18px;background:none;border:none;color:var(--accent);font-size:14px;font-weight:600;border-bottom:2px solid var(--accent);cursor:pointer;">Sin clasificar <span id="badge-sin-clasificar" style="background:var(--red);color:#fff;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
     <button class="revision-tab" onclick="switchRevisionTab('transferencias', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles transferencias internas <span id="badge-transferencias" style="background:var(--yellow);color:#000;border-radius:99px;padding:2px 7px;font-size:11px;margin-left:4px;">0</span></button>
     <button class="revision-tab" onclick="switchRevisionTab('duplicados', this)" style="padding:10px 18px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">Posibles duplicados</button>
@@ -891,9 +897,6 @@
       </div>
     </div>
   </div>
-</div>
-
-</main>
 </div>
 
 <!-- Modal Nueva Cuenta -->
@@ -1159,6 +1162,83 @@ function setPeriodo(tipo, btn) {
   cargarDashboard();
 }
 
+
+let detalleCuentasVisible = false;
+
+function toggleDetalleCuentas() {
+  detalleCuentasVisible = !detalleCuentasVisible;
+  const wrap = document.getElementById('detalle-cuentas-wrap');
+  const btn = document.getElementById('btn-toggle-detalle-cuentas');
+  if (wrap) wrap.style.display = detalleCuentasVisible ? 'block' : 'none';
+  if (btn) btn.textContent = detalleCuentasVisible ? 'Ocultar detalle' : 'Mostrar detalle';
+}
+
+function fmtCuentaOrig(valor, moneda) {
+  if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return '-';
+  const n = Number(valor);
+  const dec = moneda === 'CLP' ? 0 : 2;
+  return `${moneda} ${n.toLocaleString('es-CL', { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+}
+
+function renderDetalleCuentas(detalleCuentas = []) {
+  const wrap = document.getElementById('detalle-cuentas-wrap');
+  if (!wrap) return;
+  if (!detalleCuentas.length) {
+    wrap.innerHTML = '<div class="empty">No hay cuentas financieras para auditar.</div>';
+    return;
+  }
+
+  wrap.innerHTML = detalleCuentas.map((c, idx) => {
+    const badgeTc = c.moneda === 'CLP' ? '' : `<span style="font-size:11px;color:var(--text2);">TC usado: ${fmt(c.tipo_cambio)}${c.tc_estimado ? ' (estimado)' : ''}</span>`;
+    const rows = (c.movimientos || []).map(m => {
+      const color = m.efecto === 'suma' ? 'var(--green)' : (m.efecto === 'resta' ? 'var(--red)' : 'var(--text2)');
+      const tag = m.es_transferencia_interna ? '<span class="badge badge-gray">Interna</span>' : '';
+      return `<tr>
+        <td style="white-space:nowrap;">${m.fecha}</td>
+        <td style="min-width:220px;">${m.descripcion || '-'}<div style="font-size:11px;color:var(--text2);margin-top:2px;">${m.tipo_display} · ${m.categoria || 'sin_clasificar'} ${tag}</div></td>
+        <td style="white-space:nowrap;">${fmtCuentaOrig(m.monto_moneda_orig, m.moneda)}</td>
+        <td style="white-space:nowrap;">${fmt(m.monto_clp)}</td>
+        <td style="white-space:nowrap;color:${color};font-weight:700;">${m.signo} ${m.efecto}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty">Sin movimientos</td></tr>';
+
+    return `<div class="card" style="background:rgba(15,23,42,.35);border:1px solid rgba(148,163,184,.18);margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <div style="font-size:16px;font-weight:700;">${c.nombre}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px;">${c.institucion} · ${c.tipo_cuenta} · ${c.moneda}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:12px;color:var(--text2);">Saldo calculado</div>
+          <div style="font-size:22px;font-weight:800;">${fmtCuentaOrig(c.saldo_final_orig, c.moneda)}</div>
+          <div style="font-size:12px;color:var(--text2);">Equiv. CLP: ${fmt(c.saldo_final_clp)}</div>
+        </div>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:12px;">
+        <div class="stat-card-mini"><div class="stat-label">Saldo inicial</div><div class="stat-value" style="font-size:18px;">${fmtCuentaOrig(c.saldo_inicial_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.saldo_inicial_clp)} en CLP</div></div>
+        <div class="stat-card-mini"><div class="stat-label">Ingresos</div><div class="stat-value stat-green" style="font-size:18px;">${fmtCuentaOrig(c.ingresos_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.ingresos_clp)} en CLP</div></div>
+        <div class="stat-card-mini"><div class="stat-label">Egresos</div><div class="stat-value stat-red" style="font-size:18px;">${fmtCuentaOrig(c.egresos_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.egresos_clp)} en CLP</div></div>
+        <div class="stat-card-mini"><div class="stat-label">Movimientos</div><div class="stat-value" style="font-size:18px;">${c.movimientos_count}</div><div class="stat-sub">Mostrando ${c.movimientos_mostrados}</div></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="font-size:12px;color:var(--text2);">Fórmula: saldo inicial + ingresos - egresos</div>
+        ${badgeTc}
+      </div>
+
+      <div class="tabla-wrapper">
+        <table>
+          <thead>
+            <tr><th>Fecha</th><th>Descripción</th><th>Monto moneda</th><th>Monto CLP</th><th>Efecto</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 async function cargarDashboard() {
   const { desde, hasta } = getDesdeHasta();
   const data = await api(`/api/dashboard?desde=${desde}&hasta=${hasta}`);
@@ -1206,6 +1286,7 @@ async function cargarDashboard() {
 
   // KPIs
   renderKpis(data.kpis, 'kpi-container');
+  renderDetalleCuentas(data.detalle_cuentas || []);
 
   // Flujo mensual
   renderChartFlujo(data.flujo_mensual);

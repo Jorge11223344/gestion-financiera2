@@ -13,7 +13,7 @@ from .models import (MovimientoDiario, CierreDiario, PresupuestoMensual,
                      ConfiguracionEmpresa, CuentaContable, CentroCosto)
 from .utils import (get_resumen_periodo, get_flujo_mensual, get_ventas_por_dia,
                     get_distribucion_gastos, get_kpis_salud, calcular_iva,
-                    get_saldo_actual, get_saldo_por_cuenta)
+                    get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas)
 
 
 def index(request):
@@ -253,6 +253,7 @@ def dashboard_data(request):
     dist_gastos = get_distribucion_gastos(fecha_desde, fecha_hasta)
     saldo_actual= get_saldo_actual()
     saldos_cta  = get_saldo_por_cuenta()
+    detalle_cuentas = get_detalle_saldos_cuentas()
 
     sin_clasificar = MovimientoDiario.objects.filter(
         categoria_normalizada='sin_clasificar'
@@ -290,6 +291,7 @@ def dashboard_data(request):
         'distribucion_gastos': dist_gastos,
         'saldo_actual':        int(saldo_actual),
         'saldos_por_cuenta':   saldos_cta,          # incluye saldo (orig) + saldo_clp
+        'detalle_cuentas':     detalle_cuentas,
         'saldo_multimoneda': {
             'total_clp':       int(saldo_actual),
             'usd_saldo':       round(saldo_usd_orig, 2) if saldo_usd_orig else None,
