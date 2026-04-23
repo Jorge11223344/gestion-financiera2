@@ -2191,7 +2191,7 @@ function renderMovimientos() {
       </td>
       
       <td style="display:flex;gap:4px;flex-wrap:wrap;">
-        <button class="btn btn-secondary btn-sm" title="Editar completo" onclick="abrirEditorMovimientoCompleto('${m.id}')">✏️</button>
+        <button class="btn btn-secondary btn-sm" title="Editar línea completa" onclick="abrirEditorMovimientoCompleto('${m.id}')">✏️ Editar</button>
         <button class="btn btn-secondary btn-sm" title="Editar clasificación"
           onclick="abrirEditarMovimiento('${m.id}','${(m.descripcion||'').replace(/'/g,"\'")}','${cat}','${(m.tercero||'').replace(/'/g,"\'")}',${esInt})">🏷️</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarMovimiento('${m.id}')">🗑</button>
@@ -2931,6 +2931,7 @@ async function eliminarImportacion(id) {
 }
 
 async function abrirEditorMovimientoCompleto(id) {
+  try {
   await Promise.all([cargarCuentasFinancieras(), cargarTiposParaImport()]);
   const data = await api(`/api/movimientos/${id}`);
   if (data.error) { showToast(data.error, 'error'); return; }
@@ -2974,6 +2975,10 @@ async function abrirEditorMovimientoCompleto(id) {
       el.dataset.bindCalc = '1';
     }
   });
+  } catch (e) {
+    console.error('Error abriendo editor de movimiento:', e);
+    showToast('No se pudo abrir el editor: ' + (e.message || e), 'error');
+  }
 }
 
 async function guardarEdicionMovimiento() {
@@ -2983,6 +2988,7 @@ async function guardarEdicionMovimiento() {
     tipo: document.getElementById('em-tipo').value,
     descripcion: document.getElementById('em-descripcion').value.trim(),
     cuenta_financiera_id: document.getElementById('em-cuenta').value || null,
+    moneda: document.getElementById('em-moneda').value || 'CLP',
     medio_pago: document.getElementById('em-medio-pago').value,
     categoria_normalizada: document.getElementById('em-categoria').value,
     tercero: document.getElementById('em-tercero').value.trim(),

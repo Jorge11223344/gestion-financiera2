@@ -210,12 +210,18 @@ def movimiento_detalle(request, mov_id):
     except json.JSONDecodeError:
         return JsonResponse({'error': 'JSON inválido'}, status=400)
 
-    campos_simples = ['fecha', 'tipo', 'descripcion', 'medio_pago', 'notas',
-                      'cantidad_documentos', 'rut_contraparte', 'nombre_contraparte',
+    campos_simples = ['tipo', 'descripcion', 'medio_pago', 'notas',
+                      'rut_contraparte', 'nombre_contraparte',
                       'categoria_normalizada', 'tercero', 'es_transferencia_interna']
     for field in campos_simples:
         if field in body:
             setattr(m, field, body[field])
+
+    if 'fecha' in body and body.get('fecha'):
+        m.fecha = body.get('fecha')
+
+    if 'cantidad_documentos' in body:
+        m.cantidad_documentos = body.get('cantidad_documentos') or None
 
     # Permitir cambiar cuenta financiera y, si corresponde, sincronizar moneda
     if 'cuenta_financiera_id' in body:
@@ -239,11 +245,19 @@ def movimiento_detalle(request, mov_id):
     def _dec(v):
         if v in (None, '', 'null'):
             return None
-        return Decimal(str(v))
+        try:
+            return Decimal(str(v).replace(',', '.'))
+        except Exception:
+            raise ValueError(f'Número inválido: {v}')
 
     # Recalcular importes.
     # m.monto siempre queda en CLP para reportes.
-    if any(k in body for k in ['monto', 'monto_clp', 'monto_moneda_orig', 'tipo_cambio', 'moneda']):
+    try:
+        recalcular_importes = any(k in body for k in ['monto', 'monto_clp', 'monto_moneda_orig', 'tipo_cambio', 'moneda'])
+    except Exception as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+
+    if recalcular_importes:
         monto_clp = _dec(body.get('monto_clp', body.get('monto')))
         monto_orig = _dec(body.get('monto_moneda_orig'))
         tipo_cambio = _dec(body.get('tipo_cambio'))

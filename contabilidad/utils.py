@@ -405,11 +405,21 @@ def calcular_iva(monto_bruto):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _serializar_movimiento_detalle_cuenta(m):
-    neutro = _es_movimiento_neutro(m)
-    efecto = 'neutro' if neutro else ('suma' if m.tipo in _TIPOS_INGRESO else 'resta')
-    signo = '↔' if efecto == 'neutro' else ('+' if efecto == 'suma' else '-')
+    """
+    Serializa un movimiento para el detalle auditable de una cuenta.
+
+    Regla ERP:
+      - Para SALDO DE CUENTA, una transferencia interna SÍ suma o resta.
+      - Para RESULTADO/P&L, una transferencia interna es neutra.
+    """
+    es_ingreso = m.tipo in _TIPOS_INGRESO
+    neutro_resultado = _es_movimiento_neutro(m)
+    efecto_saldo = 'suma' if es_ingreso else 'resta'
+    signo = '+' if es_ingreso else '-'
+
     monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
     monto_clp = _monto_clp_robusto(m)
+
     return {
         'id': str(m.id),
         'fecha': str(m.fecha),
@@ -420,23 +430,29 @@ def _serializar_movimiento_detalle_cuenta(m):
         'tercero': m.tercero,
         'moneda': m.moneda,
         'monto_clp': float(round(monto_clp, 2)),
-        'monto_moneda_orig': float(round(monto_orig, 4)) if monto_orig is not None else None,
+        'monto_moneda_orig': float(round(Decimal(str(monto_orig or 0)), 4)) if monto_orig is not None else None,
         'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio else None,
         'es_transferencia_interna': bool(m.es_transferencia_interna),
-        'efecto': efecto,
+        'afecta_resultado': not neutro_resultado,
+        'efecto': efecto_saldo,
+        'efecto_saldo': efecto_saldo,
+        'efecto_resultado': 'neutro' if neutro_resultado else efecto_saldo,
         'signo': signo,
     }
 
 
-def _resumen_detalle_saldo_cuenta(cuenta):
+def _calcular_saldo_cuenta(cuenta):
+    """
+    Cálculo centralizado de saldo por cuenta.
+
+    Regla ERP:
+      - Incluye TODOS los movimientos asociados a la cuenta.
+      - Incluye transferencias internas y conversiones de divisa.
+      - No decide utilidad ni resultado; solo calcula saldo financiero.
+    """
     from .models import MovimientoDiario
 
-    movs = (
-        MovimientoDiario.objects
-        .filter(cuenta_financiera=cuenta)
-        .order_by('-fecha', '-creado_en')
-    )
-
+    movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
     saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
 
     if cuenta.moneda == 'CLP':
@@ -452,41 +468,71 @@ def _resumen_detalle_saldo_cuenta(cuenta):
     egresos_orig = Decimal('0')
     ingresos_clp = Decimal('0')
     egresos_clp = Decimal('0')
+    transferencias_internas_clp = Decimal('0')
+    transferencias_internas_count = 0
 
     for m in movs:
-        if _es_movimiento_neutro(m):
-            continue
-
         monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+        monto_orig = Decimal(str(monto_orig or 0))
         monto_clp = _monto_clp_robusto(m)
+        es_ingreso = m.tipo in _TIPOS_INGRESO
 
-        if m.tipo in _TIPOS_INGRESO:
-            ingresos_orig += Decimal(str(monto_orig or 0))
+        if es_ingreso:
+            ingresos_orig += monto_orig
             ingresos_clp += monto_clp
         else:
-            egresos_orig += Decimal(str(monto_orig or 0))
+            egresos_orig += monto_orig
             egresos_clp += monto_clp
+
+        if _es_movimiento_neutro(m):
+            transferencias_internas_count += 1
+            transferencias_internas_clp += monto_clp if es_ingreso else -monto_clp
 
     saldo_final_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
     saldo_final_clp = saldo_inicial_clp + ingresos_clp - egresos_clp
 
     return {
+        'saldo_inicial_orig': saldo_inicial_orig,
+        'saldo_inicial_clp': saldo_inicial_clp,
+        'ingresos_orig': ingresos_orig,
+        'egresos_orig': egresos_orig,
+        'ingresos_clp': ingresos_clp,
+        'egresos_clp': egresos_clp,
+        'saldo_final_orig': saldo_final_orig,
+        'saldo_final_clp': saldo_final_clp,
+        'tipo_cambio': tc,
+        'tc_estimado': tc_estimado,
+        'transferencias_internas_clp': transferencias_internas_clp,
+        'transferencias_internas_count': transferencias_internas_count,
+        'movimientos_count': movs.count(),
+    }
+
+
+def _resumen_detalle_saldo_cuenta(cuenta):
+    data = _calcular_saldo_cuenta(cuenta)
+
+    return {
         'cuenta_id': str(cuenta.pk),
+        'id': str(cuenta.pk),
         'nombre': cuenta.nombre,
         'institucion': cuenta.institucion,
         'tipo_cuenta': cuenta.get_tipo_cuenta_display(),
         'moneda': cuenta.moneda,
-        'saldo_inicial_orig': float(round(saldo_inicial_orig, 4)),
-        'saldo_inicial_clp': float(round(saldo_inicial_clp, 0)),
-        'ingresos_orig': float(round(ingresos_orig, 4)),
-        'egresos_orig': float(round(egresos_orig, 4)),
-        'ingresos_clp': float(round(ingresos_clp, 0)),
-        'egresos_clp': float(round(egresos_clp, 0)),
-        'saldo_final_orig': float(round(saldo_final_orig, 4)),
-        'saldo_final_clp': float(round(saldo_final_clp, 0)),
-        'tipo_cambio': float(tc),
-        'tc_estimado': tc_estimado,
-        'movimientos_count': movs.count(),
+        'saldo_inicial_orig': float(round(data['saldo_inicial_orig'], 4)),
+        'saldo_inicial_clp': float(round(data['saldo_inicial_clp'], 0)),
+        'ingresos_orig': float(round(data['ingresos_orig'], 4)),
+        'egresos_orig': float(round(data['egresos_orig'], 4)),
+        'ingresos_clp': float(round(data['ingresos_clp'], 0)),
+        'egresos_clp': float(round(data['egresos_clp'], 0)),
+        'saldo_final_orig': float(round(data['saldo_final_orig'], 4)),
+        'saldo_final_clp': float(round(data['saldo_final_clp'], 0)),
+        'saldo': float(round(data['saldo_final_orig'], 4)),
+        'saldo_clp': float(round(data['saldo_final_clp'], 0)),
+        'tipo_cambio': float(data['tipo_cambio']),
+        'tc_estimado': data['tc_estimado'],
+        'transferencias_internas_clp': float(round(data['transferencias_internas_clp'], 0)),
+        'transferencias_internas_count': data['transferencias_internas_count'],
+        'movimientos_count': data['movimientos_count'],
     }
 
 
@@ -521,8 +567,9 @@ def get_detalle_saldo_cuenta_paginado(cuenta_id, page=1, page_size=20):
 
 def get_detalle_saldos_cuentas():
     """
-    Devuelve solo el resumen por cuenta para el dashboard.
-    Los movimientos se cargan por separado con paginación para no inflar la respuesta.
+    Resumen por cuenta para dashboard.
+    Incluye transferencias internas porque este bloque explica saldos financieros,
+    no resultado operacional.
     """
     from .models import CuentaFinanciera
 
@@ -537,13 +584,12 @@ def get_detalle_saldos_cuentas():
 
 def get_saldo_actual():
     """
-    Saldo total consolidado en CLP.
+    Saldo financiero total consolidado en CLP.
 
-    Nota:
-    - movimientos sin cuenta asignada siguen entrando como legacy
-    - movimientos con cuenta sí consolidan por cuenta
-    - las transferencias internas siguen afectando caja total si están
-      registradas sin duplicación entre cuentas
+    Regla ERP:
+      - Incluye movimientos con cuenta financiera, incluyendo transferencias internas.
+      - Los movimientos sin cuenta se mantienen como legacy.
+      - Este saldo NO es utilidad; la utilidad se calcula con _qs_operacional().
     """
     from .models import MovimientoDiario, ConfiguracionEmpresa, CuentaFinanciera
 
@@ -552,79 +598,42 @@ def get_saldo_actual():
     movs_sin_cuenta = MovimientoDiario.objects.filter(cuenta_financiera__isnull=True)
     ing_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
     egr_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
-    saldo_legacy = config.saldo_inicial_caja + config.saldo_inicial_banco + ing_sc - egr_sc
+    saldo_legacy = Decimal(str(config.saldo_inicial_caja or 0)) + Decimal(str(config.saldo_inicial_banco or 0)) + ing_sc - egr_sc
 
     saldo_cuentas = Decimal('0')
     for cuenta in CuentaFinanciera.objects.filter(activa=True):
-        movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
-        ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
-        egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
-
-        if cuenta.moneda == 'CLP':
-            saldo_inicial_clp = cuenta.saldo_inicial
-        else:
-            tc = get_tc_vigente(cuenta.moneda)
-            saldo_inicial_clp = cuenta.saldo_inicial * tc
-
-        saldo_cuentas += saldo_inicial_clp + ingresos - egresos
+        saldo_cuentas += _calcular_saldo_cuenta(cuenta)['saldo_final_clp']
 
     return saldo_legacy + saldo_cuentas
 
 
 def get_saldo_por_cuenta():
     """
-    Saldo por cuenta financiera con dos miradas:
-      - saldo: moneda original
-      - saldo_clp: equivalente consolidado en CLP
+    Saldos actuales por cuenta financiera.
 
-    A diferencia de la versión anterior, esta excluye movimientos neutros
-    del cálculo de ingresos/egresos por cuenta.
+    Regla ERP:
+      - Incluye transferencias internas para cuadrar Banco Chile ↔ Global66.
+      - Devuelve valores JSON-safe para vistas y APIs.
     """
-    from .models import MovimientoDiario, CuentaFinanciera
+    from .models import CuentaFinanciera
 
     resultado = []
     for cuenta in CuentaFinanciera.objects.filter(activa=True):
-        movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
-        saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
-
-        if cuenta.moneda == 'CLP':
-            tc = Decimal('1')
-            tc_estimado = False
-        else:
-            tc = get_tc_vigente(cuenta.moneda)
-            tc_estimado = not movs.filter(tipo_cambio__isnull=False).exists()
-
-        ingresos_orig = Decimal('0')
-        egresos_orig = Decimal('0')
-        ingresos_clp = Decimal('0')
-        egresos_clp = Decimal('0')
-
-        for m in movs:
-            if _es_movimiento_neutro(m):
-                continue
-
-            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = _monto_clp_robusto(m)
-
-            if m.tipo in _TIPOS_INGRESO:
-                ingresos_orig += Decimal(str(monto_orig or 0))
-                ingresos_clp += monto_clp
-            else:
-                egresos_orig += Decimal(str(monto_orig or 0))
-                egresos_clp += monto_clp
-
-        saldo_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
-        saldo_clp = (saldo_inicial_orig * tc) + ingresos_clp - egresos_clp
-
+        resumen = _resumen_detalle_saldo_cuenta(cuenta)
         resultado.append({
-            'cuenta_id': str(cuenta.pk),
-            'nombre': cuenta.nombre,
-            'institucion': cuenta.institucion,
-            'moneda': cuenta.moneda,
-            'saldo': float(round(saldo_orig, 4)),
-            'saldo_clp': float(round(saldo_clp, 0)),
-            'tipo_cambio': float(tc),
-            'tc_estimado': tc_estimado,
+            'cuenta_id': resumen['cuenta_id'],
+            'id': resumen['cuenta_id'],
+            'nombre': resumen['nombre'],
+            'institucion': resumen['institucion'],
+            'moneda': resumen['moneda'],
+            'saldo': resumen['saldo'],
+            'saldo_clp': resumen['saldo_clp'],
+            'saldo_final_orig': resumen['saldo_final_orig'],
+            'saldo_final_clp': resumen['saldo_final_clp'],
+            'tipo_cambio': resumen['tipo_cambio'],
+            'tc_estimado': resumen['tc_estimado'],
+            'transferencias_internas_clp': resumen['transferencias_internas_clp'],
+            'transferencias_internas_count': resumen['transferencias_internas_count'],
         })
 
     return resultado

@@ -35,10 +35,11 @@ from .utils import get_saldo_por_cuenta
 def cuentas_financieras(request):
     if request.method == "GET":
         cuentas = CuentaFinanciera.objects.filter(activa=True)
-        saldos = {s['id']: s for s in get_saldo_por_cuenta()}
+        saldos = {str(s.get('cuenta_id') or s.get('id')): s for s in get_saldo_por_cuenta()}
         return JsonResponse({"cuentas": [
             {
                 "id": str(c.pk),
+                "activa": c.activa,
                 "nombre": c.nombre,
                 "institucion": c.institucion,
                 "tipo_cuenta": c.tipo_cuenta,
@@ -48,7 +49,10 @@ def cuentas_financieras(request):
                 "titular": c.titular,
                 "numero_parcial": c.numero_parcial,
                 "saldo_inicial": float(c.saldo_inicial),
-                "saldo_actual": float((saldos.get(str(c.pk)) or {}).get('saldo', 0) or 0),
+                # Saldo que se muestra en tarjetas de cuentas.
+                # Para CLP debe leer saldo_clp; antes usaba "saldo" y podía no reflejar transferencias internas.
+                "saldo_actual": float((saldos.get(str(c.pk)) or {}).get('saldo_clp', 0) or 0),
+                "saldo_original": float((saldos.get(str(c.pk)) or {}).get('saldo', 0) or 0),
                 "saldo_actual_clp": float((saldos.get(str(c.pk)) or {}).get('saldo_clp', 0) or 0),
                 "tipo_cambio": float((saldos.get(str(c.pk)) or {}).get('tipo_cambio', 1) or 1),
                 "tc_estimado": bool((saldos.get(str(c.pk)) or {}).get('tc_estimado', False)),
