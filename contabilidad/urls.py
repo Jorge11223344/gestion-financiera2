@@ -36,6 +36,7 @@ urlpatterns = [
     path('api/banco/preview', views_banco.preview_cartola, name='banco_preview'),
     path('api/banco/confirmar', views_banco.confirmar_importacion, name='banco_confirmar'),
     path('api/banco/importaciones', views_banco.historial_importaciones, name='banco_importaciones'),
+    path('api/banco/importaciones/<str:importacion_id>', views_banco.importacion_detalle, name='banco_importacion_detalle'),
     path('api/banco/revertir/<str:importacion_id>', views_banco.revertir_importacion, name='banco_revertir'),
 
     # Tipo de cambio
