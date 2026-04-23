@@ -716,6 +716,36 @@
       </div>
     </div>
   </div>
+
+  <div class="card section-mb" style="margin-top:24px;">
+    <div class="flex-between">
+      <div>
+        <h3 style="font-size:15px;font-weight:700;">Historial de importaciones masivas</h3>
+        <div style="font-size:12px;color:var(--text2);">Puedes revisar, editar datos básicos y eliminar una importación completa con sus movimientos.</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="cargarHistorialImportaciones()">Actualizar</button>
+    </div>
+    <div class="tabla-wrapper" style="margin-top:14px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Archivo</th>
+            <th>Banco</th>
+            <th>Cuenta</th>
+            <th>Importados</th>
+            <th>Duplicados</th>
+            <th>Errores</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-importaciones">
+          <tr><td colspan="9" class="empty">Sin importaciones todavía</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- ASISTENTE CONTABLE DE BALANCE -->
@@ -1104,6 +1134,9 @@ let currentPage = 'dashboard';
 let dashDesde = '', dashHasta = '';
 let movToDelete = null;
 let charts = {};
+let importacionesHistorial = [];
+let movEditData = null;
+let importacionEditandoId = null;
 
 // ─────────────────────────────────────────────────────────
 // Utilidades
@@ -1161,7 +1194,7 @@ function navTo(page) {
   if (page === 'presupuesto') cargarPresupuesto();
   if (page === 'configuracion') cargarConfiguracion();
   if (page === 'nuevo-movimiento') initFormMovimiento();
-  if (page === 'importar-banco') { cargarTiposParaImport(); cargarCuentasFinancieras(); }
+  if (page === 'importar-banco') { cargarTiposParaImport(); cargarCuentasFinancieras(); cargarHistorialImportaciones(); }
   if (page === 'cuentas-financieras') cargarGridCuentas();
   if (page === 'revision') cargarRevision();
   if (page === 'asistente-balance') initAsistente();
@@ -1684,7 +1717,7 @@ function renderMovimientos() {
   const slice   = movTodos.slice(inicio, inicio + MOV_POR_PAG);
 
   if (!total) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Sin movimientos para este período</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin movimientos para este período</td></tr>';
     document.getElementById('movimientos-stats').innerHTML = '';
     document.getElementById('mov-paginas').innerHTML = '';
     return;
@@ -1715,14 +1748,17 @@ function renderMovimientos() {
         ${m.cantidad_documentos ? `<small style="color:var(--text2);">(${m.cantidad_documentos} docs)</small>` : ''}
       </td>
       <td style="font-size:12px;color:var(--text2);">${m.cuenta_financiera || '—'}</td>
+      <td style="white-space:nowrap;">${m.moneda !== 'CLP' ? `${m.moneda} ${Number(m.monto_moneda_orig || 0).toLocaleString('es-CL', {minimumFractionDigits: 2, maximumFractionDigits: 4})}` : '—'}</td>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${m.tipo_cambio ? Number(m.tipo_cambio).toLocaleString('es-CL', {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '—'}</td>
       <td class="${m.es_ingreso && !esInt ? 'monto-ingreso' : esInt ? '' : 'monto-egreso'}"
           style="${esInt ? 'color:var(--text2);' : ''}">
         ${esInt ? '↔' : (m.es_ingreso ? '+' : '-')}${fmt(m.monto)}${moneda}
       </td>
       <td style="color:var(--text2);font-size:12px;">${m.monto_iva ? fmt(m.monto_iva) : '-'}</td>
-      <td style="display:flex;gap:4px;">
+      <td style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" title="Editar completo" onclick="abrirEditorMovimientoCompleto('${m.id}')">✏️</button>
         <button class="btn btn-secondary btn-sm" title="Editar clasificación"
-          onclick="abrirEditarMovimiento('${m.id}','${(m.descripcion||'').replace(/'/g,"\'")}','${cat}','${(m.tercero||'').replace(/'/g,"\'")}',${esInt})">✏️</button>
+          onclick="abrirEditarMovimiento('${m.id}','${(m.descripcion||'').replace(/'/g,"\'")}','${cat}','${(m.tercero||'').replace(/'/g,"\'")}',${esInt})">🏷️</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarMovimiento('${m.id}')">🗑</button>
       </td>
     </tr>`;
@@ -2056,6 +2092,11 @@ async function init() {
   await initFormMovimiento();
   initPresupuestoFiltros();
 
+  // Clonar catálogos del formulario principal a modal de edición
+  const mp = document.getElementById('mov-medio-pago');
+  const em = document.getElementById('em-medio-pago');
+  if (mp && em) em.innerHTML = mp.innerHTML;
+
   // Cargar dashboard inicial
   cargarDashboard();
   // Cargar cuentas para selector de importación
@@ -2075,14 +2116,19 @@ async function cargarCuentasFinancieras() {
 }
 
 function actualizarSelectorCuentas() {
-  const sel = document.getElementById('selector-cuenta');
-  if (!sel) return;
-  const valActual = sel.value;
-  sel.innerHTML = '<option value="">⚠️ Selecciona la cuenta antes de importar...</option>';
-  cuentasFinancieras.forEach(c => {
-    sel.innerHTML += `<option value="${c.id}">${c.nombre} — ${c.moneda} | ${c.institucion}</option>`;
-  });
-  if (valActual) sel.value = valActual;
+  const llenar = (id, placeholder='Selecciona') => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const valActual = sel.value;
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
+    cuentasFinancieras.forEach(c => {
+      sel.innerHTML += `<option value="${c.id}">${c.nombre} — ${c.moneda} | ${c.institucion}</option>`;
+    });
+    if (valActual) sel.value = valActual;
+  };
+  llenar('selector-cuenta', '⚠️ Selecciona la cuenta antes de importar...');
+  llenar('em-cuenta', 'Sin cuenta');
+  llenar('ei-cuenta', 'Sin cuenta');
 }
 
 function onCuentaChange() {
@@ -2168,6 +2214,14 @@ async function cargarTiposParaImport() {
   const selCat = document.getElementById('mc-categoria');
   if (selCat && categoriasMov.length) {
     selCat.innerHTML = categoriasMov.map(c => `<option value="${c.value}">${c.label}</option>`).join('');
+  }
+  const selCatEdit = document.getElementById('em-categoria');
+  if (selCatEdit && categoriasMov.length) {
+    selCatEdit.innerHTML = categoriasMov.map(c => `<option value="${c.value}">${c.label}</option>`).join('');
+  }
+  const selTipo = document.getElementById('em-tipo');
+  if (selTipo && (data.tipos || []).length) {
+    selTipo.innerHTML = (data.tipos || []).map(t => `<option value="${t.value}">${t.label}</option>`).join('');
   }
 }
 
@@ -2351,6 +2405,9 @@ async function confirmarImportacion() {
   document.getElementById('import-paso2').style.display = 'none';
   document.getElementById('import-paso3').style.display = 'block';
   document.getElementById('import-exito-msg').textContent = data.mensaje;
+  cargarHistorialImportaciones();
+  cargarMovimientos();
+  cargarDashboard();
 }
 
 function resetImport() {
@@ -2365,6 +2422,127 @@ function resetImport() {
   document.getElementById('import-paso1').style.display = 'block';
   document.getElementById('import-paso2').style.display = 'none';
   document.getElementById('import-paso3').style.display = 'none';
+}
+
+async function cargarHistorialImportaciones() {
+  const data = await api('/api/banco/importaciones');
+  importacionesHistorial = data.importaciones || [];
+  const tbody = document.getElementById('tabla-importaciones');
+  if (!tbody) return;
+  if (!importacionesHistorial.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin importaciones registradas</td></tr>';
+    return;
+  }
+  tbody.innerHTML = importacionesHistorial.map(imp => `
+    <tr>
+      <td style="white-space:nowrap;font-size:12px;">${imp.fecha}</td>
+      <td style="max-width:260px;">${imp.nombre_archivo}</td>
+      <td>${imp.banco_detectado || '—'}</td>
+      <td style="font-size:12px;color:var(--text2);">${imp.cuenta || '—'}</td>
+      <td style="text-align:right;">${imp.total_importados || 0}</td>
+      <td style="text-align:right;">${imp.total_duplicados || 0}</td>
+      <td style="text-align:right;">${imp.total_errores || 0}</td>
+      <td>${imp.estado || '—'}</td>
+      <td style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="abrirEditarImportacion('${imp.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarImportacion('${imp.id}')">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function abrirEditarImportacion(id) {
+  const imp = await api(`/api/banco/importaciones/${id}`);
+  if (imp.error) { showToast(imp.error, 'error'); return; }
+  importacionEditandoId = id;
+  document.getElementById('ei-nombre-archivo').value = imp.nombre_archivo || '';
+  document.getElementById('ei-banco').value = imp.banco_detectado || '';
+  document.getElementById('ei-cuenta').value = imp.cuenta_financiera_id || '';
+  document.getElementById('ei-estado').value = imp.estado || 'completado';
+  document.getElementById('ei-fecha').value = imp.fecha || '';
+  document.getElementById('ei-resumen').value = `${imp.total_importados || 0} importados · ${imp.total_duplicados || 0} duplicados · ${imp.total_errores || 0} errores`;
+  document.getElementById('modal-editar-importacion').classList.add('show');
+}
+
+async function guardarEdicionImportacion() {
+  if (!importacionEditandoId) return;
+  const body = {
+    nombre_archivo: document.getElementById('ei-nombre-archivo').value.trim(),
+    banco_detectado: document.getElementById('ei-banco').value.trim(),
+    cuenta_financiera_id: document.getElementById('ei-cuenta').value || null,
+    estado: document.getElementById('ei-estado').value,
+  };
+  const data = await api(`/api/banco/importaciones/${importacionEditandoId}`, {
+    method: 'PUT', body: JSON.stringify(body),
+  });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  closeModal('modal-editar-importacion');
+  showToast('✅ Importación actualizada');
+  cargarHistorialImportaciones();
+  cargarMovimientos();
+}
+
+async function eliminarImportacion(id) {
+  const ok = confirm('Se eliminará la importación completa y también todos sus movimientos asociados. ¿Continuar?');
+  if (!ok) return;
+  const data = await api(`/api/banco/importaciones/${id}`, { method: 'DELETE' });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  showToast(data.mensaje || 'Importación eliminada');
+  cargarHistorialImportaciones();
+  cargarMovimientos();
+  cargarDashboard();
+}
+
+async function abrirEditorMovimientoCompleto(id) {
+  const data = await api(`/api/movimientos/${id}`);
+  if (data.error) { showToast(data.error, 'error'); return; }
+  movEditData = data;
+  document.getElementById('em-fecha').value = data.fecha || '';
+  document.getElementById('em-tipo').value = data.tipo || '';
+  document.getElementById('em-descripcion').value = data.descripcion || '';
+  document.getElementById('em-cuenta').value = data.cuenta_financiera_id || '';
+  document.getElementById('em-moneda').value = data.moneda || 'CLP';
+  document.getElementById('em-medio-pago').value = data.medio_pago || 'transferencia';
+  document.getElementById('em-tipo-cambio').value = data.tipo_cambio ?? '';
+  document.getElementById('em-monto-orig').value = data.monto_moneda_orig ?? '';
+  document.getElementById('em-monto-clp').value = data.monto ?? '';
+  document.getElementById('em-categoria').value = data.categoria_normalizada || 'sin_clasificar';
+  document.getElementById('em-tercero').value = data.tercero || '';
+  document.getElementById('em-rut').value = data.rut_contraparte || '';
+  document.getElementById('em-nombre-contraparte').value = data.nombre_contraparte || '';
+  document.getElementById('em-cantidad-docs').value = data.cantidad_documentos || '';
+  document.getElementById('em-notas').value = data.notas || '';
+  document.getElementById('em-interna').checked = !!data.es_transferencia_interna;
+  document.getElementById('modal-editar-movimiento').classList.add('show');
+}
+
+async function guardarEdicionMovimiento() {
+  if (!movEditData?.id) return;
+  const body = {
+    fecha: document.getElementById('em-fecha').value,
+    tipo: document.getElementById('em-tipo').value,
+    descripcion: document.getElementById('em-descripcion').value.trim(),
+    cuenta_financiera_id: document.getElementById('em-cuenta').value || null,
+    medio_pago: document.getElementById('em-medio-pago').value,
+    categoria_normalizada: document.getElementById('em-categoria').value,
+    tercero: document.getElementById('em-tercero').value.trim(),
+    rut_contraparte: document.getElementById('em-rut').value.trim(),
+    nombre_contraparte: document.getElementById('em-nombre-contraparte').value.trim(),
+    cantidad_documentos: document.getElementById('em-cantidad-docs').value || null,
+    notas: document.getElementById('em-notas').value,
+    es_transferencia_interna: document.getElementById('em-interna').checked,
+    monto_moneda_orig: document.getElementById('em-monto-orig').value || null,
+    tipo_cambio: document.getElementById('em-tipo-cambio').value || null,
+    monto_clp: document.getElementById('em-monto-clp').value || null,
+  };
+  const data = await api(`/api/movimientos/${movEditData.id}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  closeModal('modal-editar-movimiento');
+  showToast('✅ Movimiento actualizado');
+  movEditData = null;
+  cargarMovimientos(movPagActual);
+  cargarDashboard();
+  if (typeof cargarRevision === 'function') cargarRevision();
 }
 
 // ─────────────────────────────────────────────────────────
