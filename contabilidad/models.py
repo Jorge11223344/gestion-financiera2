@@ -227,6 +227,39 @@ class MovimientoDiario(models.Model):
                self.categoria_normalizada not in self.CATEGORIAS_NEUTRAS
 
 
+
+
+class ControlSaldoReal(models.Model):
+    fecha = models.DateField(default=timezone.now, unique=True)
+    pendiente_efectivo_clp = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-fecha', '-creado_en']
+        verbose_name = 'Control de Saldo Real'
+        verbose_name_plural = 'Controles de Saldos Reales'
+
+    def __str__(self):
+        return f"Control saldos {self.fecha}"
+
+
+class ControlSaldoRealDetalle(models.Model):
+    control = models.ForeignKey(ControlSaldoReal, on_delete=models.CASCADE, related_name='detalles')
+    cuenta_financiera = models.ForeignKey(CuentaFinanciera, on_delete=models.CASCADE, related_name='controles_saldo_real')
+    saldo_real = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+
+    class Meta:
+        ordering = ['cuenta_financiera__institucion', 'cuenta_financiera__nombre']
+        unique_together = [('control', 'cuenta_financiera')]
+        verbose_name = 'Detalle Control Saldo Real'
+        verbose_name_plural = 'Detalles Control Saldo Real'
+
+    def __str__(self):
+        return f"{self.control.fecha} · {self.cuenta_financiera} · {self.saldo_real}"
+
+
 class CierreDiario(models.Model):
     fecha = models.DateField(unique=True)
     saldo_inicial_caja = models.DecimalField(max_digits=18, decimal_places=0, default=0)

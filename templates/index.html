@@ -256,6 +256,7 @@
   <div class="nav-item" onclick="navTo('importar-banco')"><span class="icon">🏦</span> Importar Cartola</div>
   <div class="nav-item" onclick="navTo('movimientos')"><span class="icon">📋</span> Historial</div>
   <div class="nav-item" onclick="navTo('cuentas-financieras')"><span class="icon">🏦</span> Cuentas</div>
+  <div class="nav-item" onclick="navTo('control-saldos')"><span class="icon">🧾</span> Control Saldos</div>
   <div class="nav-item" onclick="navTo('revision')"><span class="icon">🔍</span> Revisar</div>
   <div class="nav-item" onclick="navTo('cierre-diario')"><span class="icon">🔒</span> Cierre del Día</div>
   <div class="nav-section">Análisis</div>
@@ -345,6 +346,17 @@
       <button class="btn btn-secondary btn-sm" onclick="toggleDetalleCuentas()" id="btn-toggle-detalle-cuentas">Mostrar detalle</button>
     </div>
     <div id="detalle-cuentas-wrap" style="display:none;"></div>
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+      <div>
+        <div class="chart-title" style="margin-bottom:4px;">🧾 Último control de saldos reales</div>
+        <div style="font-size:12px;color:var(--text2);">Compara lo que calcula la aplicación con lo que efectivamente tienes en cada cuenta.</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="navTo('control-saldos')">Abrir módulo</button>
+    </div>
+    <div id="dashboard-control-saldos" class="empty">Sin control de saldos registrado todavía.</div>
   </div>
 
   <div class="grid-2">
@@ -924,6 +936,77 @@
   </div>
 </div>
 
+<!-- CONTROL DE SALDOS REALES -->
+<div id="page-control-saldos" class="page">
+  <div class="page-header">
+    <h1>Control de Saldos Reales</h1>
+    <p>Registra lo que realmente tienes por fecha y compáralo con el cálculo del sistema.</p>
+  </div>
+
+  <div class="card section-mb">
+    <div class="flex-between">
+      <div>
+        <h3 style="font-size:15px;font-weight:700;">Nuevo control / edición por fecha</h3>
+        <div style="font-size:12px;color:var(--text2);">Recomendado para Global66 CLP, Global66 USD, Banco de Chile y pendiente de efectivo.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="cargarControlSaldosForm()">Usar último</button>
+        <button class="btn btn-primary btn-sm" onclick="guardarControlSaldos()">💾 Guardar control</button>
+      </div>
+    </div>
+
+    <div class="form-grid" style="margin-top:16px;">
+      <div class="form-group">
+        <label>Fecha del control</label>
+        <input type="date" id="cs-fecha" />
+      </div>
+      <div class="form-group">
+        <label>Pendiente de pago / efectivo ($)</label>
+        <input type="number" id="cs-pendiente-efectivo" placeholder="0" />
+      </div>
+      <div class="form-group full">
+        <label>Notas</label>
+        <textarea id="cs-notas" placeholder="Ej: saldo revisado contra Global66 y cartola Banco de Chile"></textarea>
+      </div>
+    </div>
+
+    <div class="tabla-wrapper" style="margin-top:16px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Cuenta</th>
+            <th>Moneda</th>
+            <th>Sistema</th>
+            <th>Real</th>
+            <th>Diferencia</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-control-saldos-form">
+          <tr><td colspan="5" class="loading">Cargando cuentas...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="chart-title">Resumen del último control</div>
+      <div id="control-saldos-resumen" class="empty">Sin datos.</div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Histórico</div>
+      <div class="tabla-wrapper">
+        <table>
+          <thead><tr><th>Fecha</th><th>Pendiente efectivo</th><th>Cuentas</th><th></th></tr></thead>
+          <tbody id="tabla-control-saldos-historial">
+            <tr><td colspan="4" class="loading">Cargando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- REVISIÓN MANUAL -->
 <div id="page-revision" class="page">
   <div class="page-header">
@@ -1279,6 +1362,7 @@ let charts = {};
 let importacionesHistorial = [];
 let movEditData = null;
 let importacionEditandoId = null;
+let ultimoControlSaldos = null;
 
 // ─────────────────────────────────────────────────────────
 // Utilidades
@@ -1373,6 +1457,7 @@ function navTo(page) {
   if (page === 'nuevo-movimiento') initFormMovimiento();
   if (page === 'importar-banco') { cargarTiposParaImport(); cargarCuentasFinancieras(); cargarHistorialImportaciones(); }
   if (page === 'cuentas-financieras') cargarGridCuentas();
+  if (page === 'control-saldos') cargarControlSaldos();
   if (page === 'revision') cargarRevision();
   if (page === 'asistente-balance') initAsistente();
 }
@@ -1539,6 +1624,128 @@ function renderDetalleCuentas(detalleCuentas = []) {
   }).join('');
 }
 
+function renderDashboardControlSaldos(control) {
+  const el = document.getElementById('dashboard-control-saldos');
+  if (!el) return;
+  if (!control) {
+    el.innerHTML = '<div class="empty">Sin control de saldos registrado todavía.</div>';
+    return;
+  }
+  const detalle = (control.detalles || []).map(d => `
+    <tr>
+      <td>${d.cuenta_nombre}</td>
+      <td>${d.moneda}</td>
+      <td>${fmtCuentaOrig(d.saldo_sistema_orig, d.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(d.saldo_sistema_clp)} CLP</div></td>
+      <td>${fmtCuentaOrig(d.saldo_real_orig, d.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(d.saldo_real_clp)} CLP</div></td>
+      <td style="font-weight:700;color:${(d.diferencia_clp||0)===0?'var(--text)':((d.diferencia_clp||0)>0?'var(--green)':'var(--red)')};">${fmt(d.diferencia_clp || 0)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin detalle.</td></tr>';
+  el.innerHTML = `
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Fecha control: <strong style="color:var(--text)">${control.fecha}</strong> · Pendiente efectivo: <strong style="color:var(--yellow)">${fmt(control.pendiente_efectivo_clp || 0)}</strong></div>
+    <div class="tabla-wrapper">
+      <table>
+        <thead><tr><th>Cuenta</th><th>Moneda</th><th>Sistema</th><th>Real</th><th>Diferencia CLP</th></tr></thead>
+        <tbody>${detalle}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:13px;">
+      <div>Total sistema: <strong>${fmt(control.total_sistema_clp || 0)}</strong></div>
+      <div>Total real: <strong>${fmt((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0))}</strong></div>
+      <div>Diferencia: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+    </div>`;
+}
+
+async function cargarControlSaldos(fecha = '') {
+  const qs = fecha ? `?fecha=${fecha}` : '';
+  const data = await api(`/api/control-saldos${qs}`);
+  ultimoControlSaldos = data.control || null;
+  renderDashboardControlSaldos(data.control);
+  renderControlSaldosForm(data.control, data.cuentas_sistema || []);
+  renderControlSaldosHistorial(data.historial || []);
+  renderControlSaldosResumen(data.control);
+}
+
+function renderControlSaldosForm(control, cuentasSistema) {
+  const tbody = document.getElementById('tabla-control-saldos-form');
+  if (!tbody) return;
+  document.getElementById('cs-fecha').value = (control && control.fecha) || today();
+  document.getElementById('cs-pendiente-efectivo').value = Math.round((control && control.pendiente_efectivo_clp) || 0);
+  document.getElementById('cs-notas').value = (control && control.notas) || '';
+  const controlMap = {};
+  (control?.detalles || []).forEach(d => controlMap[d.cuenta_id] = d);
+  tbody.innerHTML = (cuentasSistema || []).map(c => {
+    const real = controlMap[c.id]?.saldo_real_orig ?? c.saldo;
+    const diff = (controlMap[c.id]?.diferencia_clp ?? 0);
+    return `
+      <tr>
+        <td>${c.nombre}<div style="font-size:11px;color:var(--text2);">${c.institucion}</div></td>
+        <td>${c.moneda}</td>
+        <td>${fmtCuentaOrig(c.saldo, c.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(c.saldo_clp)} CLP</div></td>
+        <td><input type="number" step="0.0001" data-cuenta-id="${c.id}" data-moneda="${c.moneda}" value="${real ?? 0}" style="min-width:120px;" /></td>
+        <td style="font-weight:700;color:${diff===0?'var(--text2)':(diff>0?'var(--green)':'var(--red)')};">${fmt(diff || 0)}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">No hay cuentas activas.</td></tr>';
+}
+
+function renderControlSaldosHistorial(historial) {
+  const tbody = document.getElementById('tabla-control-saldos-historial');
+  if (!tbody) return;
+  tbody.innerHTML = (historial || []).map(h => `
+    <tr>
+      <td>${h.fecha}</td>
+      <td>${fmt(h.pendiente_efectivo_clp || 0)}</td>
+      <td>${h.cuentas}</td>
+      <td style="display:flex;gap:6px;">
+        <button class="btn btn-secondary btn-sm" onclick="cargarControlSaldos('${h.fecha}')">Ver</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarControlSaldos(${h.id})">Eliminar</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin controles registrados.</td></tr>';
+}
+
+function renderControlSaldosResumen(control) {
+  const el = document.getElementById('control-saldos-resumen');
+  if (!el) return;
+  if (!control) {
+    el.innerHTML = '<div class="empty">Guarda un control para ver el resumen.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Fecha</div><div class="stat-value" style="font-size:18px;">${control.fecha}</div></div>
+      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Sistema</div><div class="stat-value stat-blue" style="font-size:18px;">${fmt(control.total_sistema_clp || 0)}</div></div>
+      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Real + pendiente</div><div class="stat-value" style="font-size:18px;color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0))}</div></div>
+    </div>
+    <div style="margin-top:14px;font-size:13px;color:var(--text2);">Diferencia total: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+    ${control.notas ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);">Notas: ${control.notas}</div>` : ''}`;
+}
+
+function cargarControlSaldosForm() {
+  renderControlSaldosForm(ultimoControlSaldos, (window.__ultimasCuentasSistema || []));
+}
+
+async function guardarControlSaldos() {
+  const fecha = document.getElementById('cs-fecha').value || today();
+  const pendiente = parseFloat(document.getElementById('cs-pendiente-efectivo').value || 0);
+  const notas = document.getElementById('cs-notas').value || '';
+  const detalles = Array.from(document.querySelectorAll('#tabla-control-saldos-form input[data-cuenta-id]')).map(i => ({
+    cuenta_financiera_id: i.dataset.cuentaId,
+    saldo_real: parseFloat(i.value || 0),
+  }));
+  const data = await api('/api/control-saldos', { method: 'POST', body: JSON.stringify({ fecha, pendiente_efectivo_clp: pendiente, notas, detalles }) });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  showToast('✅ Control de saldos guardado');
+  await cargarControlSaldos(fecha);
+  await cargarDashboard();
+}
+
+async function eliminarControlSaldos(id) {
+  if (!confirm('¿Eliminar este control de saldos?')) return;
+  const data = await api(`/api/control-saldos/${id}`, { method: 'DELETE' });
+  if (data.error) { showToast(data.error, 'error'); return; }
+  showToast('🗑️ Control eliminado');
+  await cargarControlSaldos();
+  await cargarDashboard();
+}
+
 async function cargarDashboard() {
   const { desde, hasta } = getDesdeHasta();
   const data = await api(`/api/dashboard?desde=${desde}&hasta=${hasta}`);
@@ -1571,6 +1778,7 @@ async function cargarDashboard() {
   }
 
   // Stats
+  window.__ultimasCuentasSistema = data.saldos_por_cuenta || [];
   document.getElementById('stat-saldo').textContent = fmt(data.saldo_actual);
   document.getElementById('stat-ingresos').textContent = fmt(data.resumen.total_ingresos);
   document.getElementById('stat-ventas-sub').textContent = `Ventas: ${fmt(data.resumen.ventas)}`;
@@ -1587,6 +1795,7 @@ async function cargarDashboard() {
   // KPIs
   renderKpis(data.kpis, 'kpi-container');
   renderDetalleCuentas(data.detalle_cuentas || []);
+  renderDashboardControlSaldos(data.control_saldos || null);
 
   // Flujo mensual
   renderChartFlujo(data.flujo_mensual);
@@ -2392,8 +2601,10 @@ async function cargarGridCuentas() {
       <div style="font-size:12px;color:var(--text2);">
         ${c.tipo_cuenta_display}${c.numero_parcial ? ' · ****'+c.numero_parcial : ''}
       </div>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;">
-        Saldo inicial: <strong>$${c.saldo_inicial.toLocaleString('es-CL')}</strong>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;display:flex;flex-direction:column;gap:4px;">
+        <div>Saldo inicial: <strong>${fmtCuentaOrig(c.saldo_inicial, c.moneda)}</strong></div>
+        <div>Saldo sistema: <strong style="color:var(--accent)">${fmtCuentaOrig(c.saldo_actual, c.moneda)}</strong></div>
+        <div style="font-size:11px;color:var(--text2);">Equiv. CLP: ${fmt(c.saldo_actual_clp || 0)}${c.tc_estimado ? ' · TC estimado' : ''}</div>
       </div>
     </div>
   `).join('');

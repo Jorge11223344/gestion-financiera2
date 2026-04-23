@@ -23,6 +23,7 @@ from .models import MovimientoDiario, CuentaFinanciera, RegistroImportacion
 from .importador_banco import parsear_excel, parsear_csv, convertir_a_movimientos
 from .services.clasificador import clasificar_movimiento
 from .services.conciliador import detectar_transferencias_internas, sugerir_emparejamientos
+from .utils import get_saldo_por_cuenta
 
 
 # ─────────────────────────────────────────────
@@ -34,6 +35,7 @@ from .services.conciliador import detectar_transferencias_internas, sugerir_empa
 def cuentas_financieras(request):
     if request.method == "GET":
         cuentas = CuentaFinanciera.objects.filter(activa=True)
+        saldos = {s['id']: s for s in get_saldo_por_cuenta()}
         return JsonResponse({"cuentas": [
             {
                 "id": str(c.pk),
@@ -46,6 +48,10 @@ def cuentas_financieras(request):
                 "titular": c.titular,
                 "numero_parcial": c.numero_parcial,
                 "saldo_inicial": float(c.saldo_inicial),
+                "saldo_actual": float((saldos.get(str(c.pk)) or {}).get('saldo', 0) or 0),
+                "saldo_actual_clp": float((saldos.get(str(c.pk)) or {}).get('saldo_clp', 0) or 0),
+                "tipo_cambio": float((saldos.get(str(c.pk)) or {}).get('tipo_cambio', 1) or 1),
+                "tc_estimado": bool((saldos.get(str(c.pk)) or {}).get('tc_estimado', False)),
             }
             for c in cuentas
         ]})

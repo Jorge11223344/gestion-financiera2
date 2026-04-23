@@ -10,7 +10,8 @@ from django.db.models import Sum, Q
 import calendar
 
 from .models import (MovimientoDiario, CierreDiario, PresupuestoMensual,
-                     ConfiguracionEmpresa, CuentaContable, CentroCosto)
+                     ConfiguracionEmpresa, CuentaContable, CentroCosto,
+                     CuentaFinanciera, ControlSaldoReal, ControlSaldoRealDetalle)
 from .utils import (get_resumen_periodo, get_flujo_mensual, get_ventas_por_dia,
                     get_distribucion_gastos, get_kpis_salud, calcular_iva,
                     get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas,
@@ -303,6 +304,66 @@ def dashboard_cuenta_detalle(request, cuenta_id):
         return JsonResponse({'error': str(exc)}, status=404)
 
 
+def _tipo_cambio_referencia(cuenta, saldos_cta=None):
+    if cuenta.moneda == 'CLP':
+        return Decimal('1')
+    if saldos_cta:
+        fila = next((c for c in saldos_cta if c['id'] == str(cuenta.id)), None)
+        if fila and fila.get('tipo_cambio'):
+            return Decimal(str(fila['tipo_cambio']))
+    mov = MovimientoDiario.objects.filter(
+        cuenta_financiera=cuenta,
+        tipo_cambio__isnull=False,
+    ).exclude(tipo_cambio=0).order_by('-fecha', '-creado_en').first()
+    return Decimal(str(mov.tipo_cambio)) if mov and mov.tipo_cambio else Decimal('1')
+
+
+def _serialize_control(control, saldos_cta=None):
+    if not control:
+        return None
+    saldos_cta = saldos_cta or []
+    saldos_map = {c['id']: c for c in saldos_cta}
+    detalles = []
+    total_real_clp = Decimal('0')
+    total_sistema_clp = Decimal('0')
+
+    for det in control.detalles.select_related('cuenta_financiera').all():
+        cuenta = det.cuenta_financiera
+        sistema = saldos_map.get(str(cuenta.id), {})
+        tc = _tipo_cambio_referencia(cuenta, saldos_cta)
+        saldo_real_orig = Decimal(str(det.saldo_real or 0))
+        saldo_real_clp = saldo_real_orig if cuenta.moneda == 'CLP' else saldo_real_orig * tc
+        saldo_sistema_orig = Decimal(str(sistema.get('saldo', 0)))
+        saldo_sistema_clp = Decimal(str(sistema.get('saldo_clp', 0)))
+        total_real_clp += saldo_real_clp
+        total_sistema_clp += saldo_sistema_clp
+        detalles.append({
+            'cuenta_id': str(cuenta.id),
+            'cuenta_nombre': cuenta.nombre,
+            'institucion': cuenta.institucion,
+            'moneda': cuenta.moneda,
+            'saldo_real_orig': float(round(saldo_real_orig, 4)),
+            'saldo_real_clp': float(round(saldo_real_clp, 0)),
+            'saldo_sistema_orig': float(sistema.get('saldo', 0) or 0),
+            'saldo_sistema_clp': float(sistema.get('saldo_clp', 0) or 0),
+            'diferencia_orig': float(round(saldo_real_orig - saldo_sistema_orig, 4)),
+            'diferencia_clp': float(round(saldo_real_clp - saldo_sistema_clp, 0)),
+            'tipo_cambio_ref': float(tc),
+        })
+
+    pendiente = Decimal(str(control.pendiente_efectivo_clp or 0))
+    return {
+        'id': control.id,
+        'fecha': str(control.fecha),
+        'pendiente_efectivo_clp': float(round(pendiente, 0)),
+        'notas': control.notas,
+        'detalles': detalles,
+        'total_real_clp': float(round(total_real_clp, 0)),
+        'total_sistema_clp': float(round(total_sistema_clp, 0)),
+        'diferencia_total_clp': float(round(total_real_clp + pendiente - total_sistema_clp, 0)),
+    }
+
+
 def dashboard_data(request):
     hoy         = date.today()
     fecha_desde = date(hoy.year, hoy.month, 1)
@@ -321,6 +382,7 @@ def dashboard_data(request):
     saldo_actual= get_saldo_actual()
     saldos_cta  = get_saldo_por_cuenta()
     detalle_cuentas = get_detalle_saldos_cuentas()
+    latest_control = ControlSaldoReal.objects.prefetch_related('detalles__cuenta_financiera').first()
 
     sin_clasificar = MovimientoDiario.objects.filter(
         categoria_normalizada='sin_clasificar'
@@ -369,6 +431,7 @@ def dashboard_data(request):
         },
         'sin_clasificar':      sin_clasificar,
         'ultimos_movimientos': ultimos_data,
+        'control_saldos':      _serialize_control(latest_control, saldos_cta),
         'periodo':             {'desde': str(fecha_desde), 'hasta': str(fecha_hasta)},
     })
 
@@ -509,6 +572,85 @@ def configuracion(request):
             setattr(config, f, body[f])
     config.save()
     return JsonResponse({'mensaje': 'Configuración guardada'})
+
+
+# ──────────────────────────────────────────────
+# CONTROL DE SALDOS REALES
+# ──────────────────────────────────────────────
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def control_saldos(request):
+    if request.method == 'GET':
+        saldos_cta = get_saldo_por_cuenta()
+        fecha = request.GET.get('fecha')
+        qs = ControlSaldoReal.objects.prefetch_related('detalles__cuenta_financiera')
+        control = qs.filter(fecha=fecha).first() if fecha else qs.first()
+        historial = []
+        for c in qs[:20]:
+            historial.append({
+                'id': c.id,
+                'fecha': str(c.fecha),
+                'pendiente_efectivo_clp': float(round(c.pendiente_efectivo_clp, 0)),
+                'cuentas': c.detalles.count(),
+                'notas': c.notas,
+            })
+        return JsonResponse({
+            'control': _serialize_control(control, saldos_cta),
+            'historial': historial,
+            'cuentas_sistema': saldos_cta,
+        })
+
+    body = json.loads(request.body)
+    fecha = body.get('fecha') or str(date.today())
+    pendiente = Decimal(str(body.get('pendiente_efectivo_clp') or 0))
+    notas = body.get('notas', '')
+    detalles = body.get('detalles', [])
+
+    control, _ = ControlSaldoReal.objects.update_or_create(
+        fecha=fecha,
+        defaults={
+            'pendiente_efectivo_clp': pendiente,
+            'notas': notas,
+        }
+    )
+    control.detalles.all().delete()
+    cuentas = {str(c.id): c for c in CuentaFinanciera.objects.filter(activa=True)}
+    nuevos = []
+    for d in detalles:
+        cuenta_id = str(d.get('cuenta_financiera_id') or '')
+        if not cuenta_id or cuenta_id not in cuentas:
+            continue
+        saldo_real = Decimal(str(d.get('saldo_real') or 0))
+        nuevos.append(ControlSaldoRealDetalle(
+            control=control,
+            cuenta_financiera=cuentas[cuenta_id],
+            saldo_real=saldo_real,
+        ))
+    if nuevos:
+        ControlSaldoRealDetalle.objects.bulk_create(nuevos)
+
+    control = ControlSaldoReal.objects.prefetch_related('detalles__cuenta_financiera').get(pk=control.pk)
+    return JsonResponse({
+        'ok': True,
+        'control': _serialize_control(control, get_saldo_por_cuenta()),
+        'mensaje': 'Control de saldos guardado',
+    }, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "DELETE"])
+def control_saldos_detalle(request, control_id):
+    try:
+        control = ControlSaldoReal.objects.prefetch_related('detalles__cuenta_financiera').get(pk=control_id)
+    except ControlSaldoReal.DoesNotExist:
+        return JsonResponse({'error': 'Control no encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        control.delete()
+        return JsonResponse({'ok': True})
+
+    return JsonResponse({'control': _serialize_control(control, get_saldo_por_cuenta())})
 
 
 # ──────────────────────────────────────────────

@@ -25,6 +25,10 @@ urlpatterns = [
     # Configuración empresa
     path('api/configuracion', views.configuracion, name='configuracion'),
 
+    # Control de saldos reales
+    path('api/control-saldos', views.control_saldos, name='control_saldos'),
+    path('api/control-saldos/<int:control_id>', views.control_saldos_detalle, name='control_saldos_detalle'),
+
     # Catálogos
     path('api/tipos', views.tipos_movimiento, name='tipos'),
     path('api/calcular-iva', views.calcular_iva_view, name='calcular_iva'),
