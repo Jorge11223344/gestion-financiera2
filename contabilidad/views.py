@@ -184,12 +184,17 @@ def movimiento_detalle(request, mov_id):
             'descripcion':           m.descripcion,
             'monto':                 float(m.monto),
             'moneda':                m.moneda,
-            'monto_moneda_orig':     float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
-            'tipo_cambio':           float(m.tipo_cambio) if m.tipo_cambio else None,
+            'monto_moneda_orig':     float(m.monto_moneda_orig) if m.monto_moneda_orig is not None else None,
+            'tipo_cambio':           float(m.tipo_cambio) if m.tipo_cambio is not None else None,
+            'medio_pago':            m.medio_pago,
+            'cuenta_financiera_id':  str(m.cuenta_financiera_id) if m.cuenta_financiera_id else None,
             'categoria_normalizada': m.categoria_normalizada,
             'tercero':               m.tercero,
             'es_transferencia_interna': m.es_transferencia_interna,
             'referencia_externa':    m.referencia_externa,
+            'cantidad_documentos':   m.cantidad_documentos,
+            'rut_contraparte':       m.rut_contraparte,
+            'nombre_contraparte':    m.nombre_contraparte,
             'notas':                 m.notas,
         })
 
@@ -198,9 +203,6 @@ def movimiento_detalle(request, mov_id):
         return JsonResponse({'mensaje': 'Eliminado'})
 
     # ── PUT: editar movimiento ──
-    # BUG CORREGIDO: antes el PUT solo guardaba los campos nuevos pero
-    # NO recalculaba monto_base_clp si cambiaban monto o tipo_cambio.
-    # Ahora recalcula correctamente.
     try:
         body = json.loads(request.body)
     except json.JSONDecodeError:
@@ -213,26 +215,76 @@ def movimiento_detalle(request, mov_id):
         if field in body:
             setattr(m, field, body[field])
 
-    # Recalcular monto_base_clp si cambia monto o tipo_cambio
-    if 'monto' in body or 'tipo_cambio' in body:
-        nuevo_monto = Decimal(str(body.get('monto', float(m.monto_moneda_orig or m.monto))))
-        nuevo_tc    = Decimal(str(body.get('tipo_cambio', float(m.tipo_cambio or 1))))
-
-        if m.moneda != 'CLP' and nuevo_tc > 1:
-            m.monto_moneda_orig = nuevo_monto
-            m.tipo_cambio       = nuevo_tc
-            m.monto             = nuevo_monto * nuevo_tc   # recalcular monto_base_clp
+    # Permitir cambiar cuenta financiera y, si corresponde, sincronizar moneda
+    if 'cuenta_financiera_id' in body:
+        cuenta_id = body.get('cuenta_financiera_id')
+        if cuenta_id:
+            try:
+                from .models import CuentaFinanciera
+                cuenta = CuentaFinanciera.objects.get(pk=cuenta_id)
+                m.cuenta_financiera = cuenta
+                m.moneda = cuenta.moneda or m.moneda
+            except CuentaFinanciera.DoesNotExist:
+                return JsonResponse({'error': 'Cuenta financiera no encontrada'}, status=404)
         else:
-            m.monto = nuevo_monto
+            m.cuenta_financiera = None
+            if body.get('moneda'):
+                m.moneda = body.get('moneda')
 
-        # Recalcular IVA si aplica
+    if 'moneda' in body and body.get('moneda'):
+        m.moneda = body.get('moneda')
+
+    def _dec(v):
+        if v in (None, '', 'null'):
+            return None
+        return Decimal(str(v))
+
+    # Recalcular importes.
+    # m.monto siempre queda en CLP para reportes.
+    if any(k in body for k in ['monto', 'monto_clp', 'monto_moneda_orig', 'tipo_cambio', 'moneda']):
+        monto_clp = _dec(body.get('monto_clp', body.get('monto')))
+        monto_orig = _dec(body.get('monto_moneda_orig'))
+        tipo_cambio = _dec(body.get('tipo_cambio'))
+
+        if m.moneda != 'CLP':
+            if monto_orig is None:
+                monto_orig = m.monto_moneda_orig
+            if tipo_cambio is None:
+                tipo_cambio = m.tipo_cambio
+            if monto_clp is None and monto_orig is not None and tipo_cambio is not None:
+                monto_clp = monto_orig * tipo_cambio
+
+            m.monto_moneda_orig = monto_orig
+            m.tipo_cambio = tipo_cambio
+            if monto_clp is not None:
+                m.monto = monto_clp
+            elif monto_orig is not None:
+                # fallback cuando aún no hay TC
+                m.monto = monto_orig
+            m.tc_pendiente = bool(m.moneda != 'CLP' and not m.tipo_cambio)
+        else:
+            if monto_clp is None:
+                monto_clp = monto_orig if monto_orig is not None else m.monto
+            if monto_clp is not None:
+                m.monto = monto_clp
+            m.monto_moneda_orig = None
+            m.tipo_cambio = None
+            m.tc_pendiente = False
+
         if m.tipo in ['suma_facturas_emitidas', 'suma_facturas_recibidas']:
-            info      = calcular_iva(m.monto)
+            info = calcular_iva(m.monto)
             m.monto_neto = info['neto']
-            m.monto_iva  = info['iva']
+            m.monto_iva = info['iva']
 
     m.save()
-    return JsonResponse({'mensaje': 'Actualizado'})
+    return JsonResponse({
+        'mensaje': 'Actualizado',
+        'id': str(m.id),
+        'monto_clp': float(m.monto),
+        'monto_moneda_orig': float(m.monto_moneda_orig) if m.monto_moneda_orig is not None else None,
+        'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio is not None else None,
+        'moneda': m.moneda,
+    })
 
 
 # ──────────────────────────────────────────────

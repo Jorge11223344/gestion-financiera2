@@ -493,13 +493,15 @@
             <th>Categoría</th>
             <th>Descripción</th>
             <th>Cuenta</th>
-            <th>Monto</th>
-            <th>IVA</th>
+            <th>Monto origen</th>
+            <th>Tipo cambio</th>
+            <th>Monto CLP</th>
+           
             <th style="width:80px;"></th>
           </tr>
         </thead>
         <tbody id="tabla-movimientos">
-          <tr><td colspan="7" class="loading">Cargando...</td></tr>
+          <tr><td colspan="9" class="loading">Cargando...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1123,6 +1125,146 @@
   </div>
 </div>
 
+
+<!-- Modal Editar Importación -->
+<div class="modal-overlay" id="modal-editar-importacion">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-header">
+      <span class="modal-title">Editar importación</span>
+      <button class="modal-close" onclick="closeModal('modal-editar-importacion')">✕</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Nombre archivo</label>
+        <input type="text" id="ei-nombre-archivo" />
+      </div>
+      <div class="form-group">
+        <label>Banco detectado</label>
+        <input type="text" id="ei-banco" />
+      </div>
+      <div class="form-group">
+        <label>Cuenta financiera</label>
+        <select id="ei-cuenta"></select>
+      </div>
+      <div class="form-group">
+        <label>Estado</label>
+        <select id="ei-estado">
+          <option value="completado">Completado</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="revertido">Revertido</option>
+          <option value="error">Error</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Fecha importación</label>
+        <input type="text" id="ei-fecha" readonly />
+      </div>
+      <div class="form-group full">
+        <label>Resumen</label>
+        <input type="text" id="ei-resumen" readonly />
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarEdicionImportacion()">💾 Guardar</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-editar-importacion')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar Movimiento -->
+<div class="modal-overlay" id="modal-editar-movimiento">
+  <div class="modal" style="max-width:920px;">
+    <div class="modal-header">
+      <span class="modal-title">Editar movimiento</span>
+      <button class="modal-close" onclick="closeModal('modal-editar-movimiento')">✕</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="date" id="em-fecha" />
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="em-tipo"></select>
+      </div>
+      <div class="form-group full">
+        <label>Descripción</label>
+        <input type="text" id="em-descripcion" />
+      </div>
+      <div class="form-group">
+        <label>Cuenta financiera</label>
+        <select id="em-cuenta"></select>
+      </div>
+      <div class="form-group">
+        <label>Moneda</label>
+        <select id="em-moneda">
+          <option value="CLP">CLP</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="UF">UF</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Medio de pago</label>
+        <select id="em-medio-pago">
+          <option value="transferencia">Transferencia</option>
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta_debito">Tarjeta débito</option>
+          <option value="tarjeta_credito">Tarjeta crédito</option>
+          <option value="cheque">Cheque</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Monto origen</label>
+        <input type="number" step="0.0001" id="em-monto-orig" placeholder="Ej. 100.00" />
+      </div>
+      <div class="form-group">
+        <label>Tipo de cambio</label>
+        <input type="number" step="0.0001" id="em-tipo-cambio" placeholder="Ej. 950.50" />
+      </div>
+      <div class="form-group">
+        <label>Monto CLP</label>
+        <input type="number" step="0.01" id="em-monto-clp" placeholder="Monto en pesos" />
+      </div>
+      <div class="form-group">
+        <label>Categoría</label>
+        <select id="em-categoria"></select>
+      </div>
+      <div class="form-group">
+        <label>Tercero</label>
+        <input type="text" id="em-tercero" />
+      </div>
+      <div class="form-group">
+        <label>RUT contraparte</label>
+        <input type="text" id="em-rut" />
+      </div>
+      <div class="form-group">
+        <label>Nombre contraparte</label>
+        <input type="text" id="em-nombre-contraparte" />
+      </div>
+      <div class="form-group">
+        <label>Cantidad documentos</label>
+        <input type="number" id="em-cantidad-docs" />
+      </div>
+      <div class="form-group full">
+        <label>Notas</label>
+        <textarea id="em-notas"></textarea>
+      </div>
+      <div class="form-group full">
+        <label>
+          <input type="checkbox" id="em-interna" style="width:auto;margin-right:6px;" />
+          Es transferencia interna
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="guardarEdicionMovimiento()">💾 Guardar cambios</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-editar-movimiento')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1194,6 +1336,17 @@ function getCookie(name) {
 
 function today() {
   return new Date().toISOString().split('T')[0];
+}
+
+function recalcularMontoClpEditor() {
+  const moneda = document.getElementById('em-moneda')?.value || 'CLP';
+  const montoOrig = parseFloat(document.getElementById('em-monto-orig')?.value || 0);
+  const tc = parseFloat(document.getElementById('em-tipo-cambio')?.value || 0);
+  const montoClp = document.getElementById('em-monto-clp');
+  if (!montoClp) return;
+  if (moneda !== 'CLP' && montoOrig > 0 && tc > 0) {
+    montoClp.value = (montoOrig * tc).toFixed(2);
+  }
 }
 
 function destroyChart(id) {
@@ -1758,7 +1911,6 @@ function renderMovimientos() {
     const catLabel = CAT_LABELS[cat] || cat;
     const catColor = CAT_COLORS[cat] || 'var(--text2)';
     const esInt    = m.es_transferencia_interna;
-    const moneda   = m.moneda !== 'CLP' ? ` <span style="font-size:10px;color:var(--text2);">${m.moneda}</span>` : '';
     return `
     <tr>
       <td style="white-space:nowrap;font-size:12px;">${m.fecha}</td>
@@ -1773,12 +1925,12 @@ function renderMovimientos() {
       </td>
       <td style="font-size:12px;color:var(--text2);">${m.cuenta_financiera || '—'}</td>
       <td style="white-space:nowrap;">${m.moneda !== 'CLP' ? `${m.moneda} ${Number(m.monto_moneda_orig || 0).toLocaleString('es-CL', {minimumFractionDigits: 2, maximumFractionDigits: 4})}` : '—'}</td>
-      <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${m.tipo_cambio ? Number(m.tipo_cambio).toLocaleString('es-CL', {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '—'}</td>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${m.tipo_cambio ? Number(m.tipo_cambio).toLocaleString('es-CL', {minimumFractionDigits: 2, maximumFractionDigits: 4}) : (m.moneda !== 'CLP' ? 'Pendiente' : '—')}</td>
       <td class="${m.es_ingreso && !esInt ? 'monto-ingreso' : esInt ? '' : 'monto-egreso'}"
           style="${esInt ? 'color:var(--text2);' : ''}">
-        ${esInt ? '↔' : (m.es_ingreso ? '+' : '-')}${fmt(m.monto)}${moneda}
+        ${esInt ? '↔' : (m.es_ingreso ? '+' : '-')}${fmt(m.monto)}
       </td>
-      <td style="color:var(--text2);font-size:12px;">${m.monto_iva ? fmt(m.monto_iva) : '-'}</td>
+      
       <td style="display:flex;gap:4px;flex-wrap:wrap;">
         <button class="btn btn-secondary btn-sm" title="Editar completo" onclick="abrirEditorMovimientoCompleto('${m.id}')">✏️</button>
         <button class="btn btn-secondary btn-sm" title="Editar clasificación"
@@ -2518,9 +2670,24 @@ async function eliminarImportacion(id) {
 }
 
 async function abrirEditorMovimientoCompleto(id) {
+  await Promise.all([cargarCuentasFinancieras(), cargarTiposParaImport()]);
   const data = await api(`/api/movimientos/${id}`);
   if (data.error) { showToast(data.error, 'error'); return; }
   movEditData = data;
+  try { llenar('em-cuenta', 'Sin cuenta'); } catch(e) {}
+  try {
+    const selTipo = document.getElementById('em-tipo');
+    if (selTipo && !selTipo.options.length) {
+      const origen = document.getElementById('import-tipo-default');
+      if (origen) selTipo.innerHTML = origen.innerHTML;
+    }
+  } catch(e) {}
+  try {
+    const selCat = document.getElementById('em-categoria');
+    if (selCat && !selCat.options.length) {
+      selCat.innerHTML = `<option value="venta">Venta</option><option value="aporte_socio">Aporte Socio</option><option value="interes_ganado">Interés</option><option value="pago_proveedor">Proveedor</option><option value="pago_importacion">Importación</option><option value="gasto_logistica">Logística</option><option value="remuneracion_norm">Remuneración</option><option value="gasto_operacional">Gasto Operacional</option><option value="comision_bancaria">Comisión Bancaria</option><option value="pago_impuesto">Impuesto</option><option value="pago_prestamo_norm">Pago Préstamo</option><option value="transferencia_interna">Transferencia Interna</option><option value="conversion_divisa">Conversión Divisa</option><option value="sin_clasificar">Sin clasificar</option>`;
+    }
+  } catch(e) {}
   document.getElementById('em-fecha').value = data.fecha || '';
   document.getElementById('em-tipo').value = data.tipo || '';
   document.getElementById('em-descripcion').value = data.descripcion || '';
@@ -2538,6 +2705,14 @@ async function abrirEditorMovimientoCompleto(id) {
   document.getElementById('em-notas').value = data.notas || '';
   document.getElementById('em-interna').checked = !!data.es_transferencia_interna;
   document.getElementById('modal-editar-movimiento').classList.add('show');
+  ['em-monto-orig','em-tipo-cambio','em-moneda'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.bindCalc) {
+      el.addEventListener('input', recalcularMontoClpEditor);
+      el.addEventListener('change', recalcularMontoClpEditor);
+      el.dataset.bindCalc = '1';
+    }
+  });
 }
 
 async function guardarEdicionMovimiento() {
