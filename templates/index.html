@@ -402,6 +402,32 @@
           <option value="otro">Otro</option>
         </select>
       </div>
+      <!-- Cuenta Financiera -->
+      <div class="form-group full">
+        <label>Cuenta Financiera (opcional)</label>
+        <select id="mov-cuenta-financiera" onchange="onCuentaChange()">
+          <option value="">— Sin asignar —</option>
+        </select>
+        <div id="mov-cuenta-info" style="font-size:12px;color:var(--text2);margin-top:4px;display:none;"></div>
+      </div>
+      <!-- Tipo de Cambio (solo para moneda extranjera) -->
+      <div id="campos-tipo-cambio" style="display:none;" class="full">
+        <div class="form-grid">
+          <div class="form-group">
+            <label id="mov-tc-label">Tipo de Cambio (CLP por 1 USD)</label>
+            <input type="number" id="mov-tipo-cambio" placeholder="Ej: 950" min="0.0001" step="0.01"
+                   oninput="onTipoCambioChange()" />
+          </div>
+          <div class="form-group">
+            <label>Equivalente en CLP</label>
+            <input type="text" id="mov-monto-clp-equiv" readonly placeholder="Se calcula automáticamente"
+                   style="background:var(--bg2);cursor:default;font-weight:700;color:var(--green);" />
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--yellow);margin-top:-8px;padding-bottom:8px;">
+          ⚠️ El monto ingresado arriba es en moneda extranjera. El tipo de cambio convierte a CLP para los reportes.
+        </div>
+      </div>
       <!-- Campos para boletas/facturas -->
       <div id="campos-documentos" style="display:none;" class="full">
         <div class="form-grid">
@@ -1414,6 +1440,8 @@ function renderChartVentas(ventas) {
 // ─────────────────────────────────────────────────────────
 async function initFormMovimiento() {
   document.getElementById('mov-fecha').value = today();
+  // Cargar cuentas financieras en el selector del formulario
+  await cargarCuentasEnForm();
   const data = await api('/api/tipos');
 
   // Llenar selector de tipo en nuevo movimiento
@@ -1452,6 +1480,65 @@ async function initFormMovimiento() {
   }
 }
 
+// ─── Cache de cuentas financieras para el formulario ───────────────────────
+let _cuentasCache = [];
+
+async function cargarCuentasEnForm() {
+  if (_cuentasCache.length > 0) return; // ya cargadas
+  const data = await api('/api/cuentas-financieras');
+  _cuentasCache = (data.cuentas || []).filter(c => c.activa !== false);
+  const sel = document.getElementById('mov-cuenta-financiera');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Sin asignar —</option>';
+  _cuentasCache.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = `${c.nombre} — ${c.moneda} | ${c.institucion}`;
+    opt.dataset.moneda = c.moneda;
+    sel.appendChild(opt);
+  });
+}
+
+function onCuentaChange() {
+  const sel = document.getElementById('mov-cuenta-financiera');
+  const opt = sel.options[sel.selectedIndex];
+  const moneda = opt?.dataset?.moneda || 'CLP';
+  const infoDiv = document.getElementById('mov-cuenta-info');
+  const tcDiv   = document.getElementById('campos-tipo-cambio');
+  const tcLabel = document.getElementById('mov-tc-label');
+
+  if (opt && opt.value) {
+    const cuenta = _cuentasCache.find(c => c.id === opt.value);
+    if (cuenta) {
+      infoDiv.textContent = `🏦 ${cuenta.institucion} · ${cuenta.tipo_cuenta_display || cuenta.tipo_cuenta} · ${cuenta.moneda}`;
+      infoDiv.style.display = 'block';
+    }
+  } else {
+    infoDiv.style.display = 'none';
+  }
+
+  if (moneda !== 'CLP') {
+    tcDiv.style.display = 'block';
+    tcLabel.textContent = `Tipo de Cambio (CLP por 1 ${moneda})`;
+    onTipoCambioChange();
+  } else {
+    tcDiv.style.display = 'none';
+    document.getElementById('mov-tipo-cambio').value = '';
+    document.getElementById('mov-monto-clp-equiv').value = '';
+  }
+}
+
+function onTipoCambioChange() {
+  const monto = parseFloat(document.getElementById('mov-monto').value) || 0;
+  const tc    = parseFloat(document.getElementById('mov-tipo-cambio').value) || 0;
+  const equiv = document.getElementById('mov-monto-clp-equiv');
+  if (monto > 0 && tc > 0) {
+    equiv.value = fmt(monto * tc);
+  } else {
+    equiv.value = tc > 0 ? '—' : '';
+  }
+}
+
 function onTipoChange() {
   const tipo = document.getElementById('mov-tipo').value;
   const esBolFac = ['suma_boletas', 'suma_facturas_emitidas', 'suma_facturas_recibidas'].includes(tipo);
@@ -1465,54 +1552,83 @@ async function onMontoChange() {
   const tipo = document.getElementById('mov-tipo').value;
   const monto = document.getElementById('mov-monto').value;
   const esFact = ['suma_facturas_emitidas', 'suma_facturas_recibidas'].includes(tipo);
-  if (!esFact || !monto) return;
-  const data = await api(`/api/calcular-iva?monto=${monto}`);
-  document.getElementById('iva-neto').textContent = fmt(data.neto);
-  document.getElementById('iva-monto').textContent = fmt(data.iva);
-  document.getElementById('iva-total').textContent = fmt(data.bruto);
+  if (esFact && monto) {
+    const data = await api(`/api/calcular-iva?monto=${monto}`);
+    document.getElementById('iva-neto').textContent = fmt(data.neto);
+    document.getElementById('iva-monto').textContent = fmt(data.iva);
+    document.getElementById('iva-total').textContent = fmt(data.bruto);
+  }
+  // Recalcular equivalente CLP si hay tipo de cambio
+  onTipoCambioChange();
 }
 
 async function guardarMovimiento() {
-  const fecha = document.getElementById('mov-fecha').value;
-  const tipo = document.getElementById('mov-tipo').value;
+  const fecha       = document.getElementById('mov-fecha').value;
+  const tipo        = document.getElementById('mov-tipo').value;
   const descripcion = document.getElementById('mov-descripcion').value.trim();
-  const monto = document.getElementById('mov-monto').value;
+  const monto       = document.getElementById('mov-monto').value;
 
   if (!fecha || !tipo || !descripcion || !monto) {
     showToast('Completa todos los campos requeridos', 'error'); return;
   }
 
+  // Validar tipo de cambio si cuenta es en moneda extranjera
+  const cuentaId = document.getElementById('mov-cuenta-financiera').value;
+  const tcDiv    = document.getElementById('campos-tipo-cambio');
+  const tcVisible = tcDiv && tcDiv.style.display !== 'none';
+  const tipoCambio = document.getElementById('mov-tipo-cambio').value;
+
+  if (tcVisible && (!tipoCambio || parseFloat(tipoCambio) <= 0)) {
+    showToast('Ingresa el tipo de cambio para esta cuenta en moneda extranjera', 'error');
+    document.getElementById('mov-tipo-cambio').focus();
+    return;
+  }
+
   const body = {
-    fecha, tipo, descripcion, monto: parseFloat(monto),
-    medio_pago: document.getElementById('mov-medio-pago').value,
-    notas: document.getElementById('mov-notas').value,
+    fecha, tipo, descripcion,
+    monto:               parseFloat(monto),
+    medio_pago:          document.getElementById('mov-medio-pago').value,
+    notas:               document.getElementById('mov-notas').value,
     cantidad_documentos: document.getElementById('mov-cantidad-docs').value || null,
-    rut_contraparte: document.getElementById('mov-rut').value,
-    nombre_contraparte: document.getElementById('mov-nombre-contraparte').value,
+    rut_contraparte:     document.getElementById('mov-rut').value,
+    nombre_contraparte:  document.getElementById('mov-nombre-contraparte').value,
   };
+
+  // Incluir cuenta financiera si se seleccionó
+  if (cuentaId) body.cuenta_financiera_id = cuentaId;
+
+  // Incluir tipo de cambio si aplica
+  if (tcVisible && tipoCambio && parseFloat(tipoCambio) > 0) {
+    body.tipo_cambio = parseFloat(tipoCambio);
+  }
 
   const data = await api('/api/movimientos', { method: 'POST', body: JSON.stringify(body) });
   if (data.error) { showToast(data.error, 'error'); return; }
 
   let msg = '✅ Movimiento guardado';
   if (data.monto_neto) msg += ` | Neto: ${fmt(data.monto_neto)} | IVA: ${fmt(data.monto_iva)}`;
+  if (data.tipo_cambio_usado) msg += ` | TC: ${data.tipo_cambio_usado}`;
   showToast(msg);
   limpiarFormMovimiento();
-  // CORREGIDO: refrescar dashboard para reflejar el nuevo movimiento
   cargarDashboard();
 }
 
 function limpiarFormMovimiento() {
-  document.getElementById('mov-fecha').value = today();
-  document.getElementById('mov-tipo').value = '';
-  document.getElementById('mov-descripcion').value = '';
-  document.getElementById('mov-monto').value = '';
-  document.getElementById('mov-notas').value = '';
-  document.getElementById('mov-cantidad-docs').value = '';
-  document.getElementById('mov-rut').value = '';
+  document.getElementById('mov-fecha').value        = today();
+  document.getElementById('mov-tipo').value         = '';
+  document.getElementById('mov-descripcion').value  = '';
+  document.getElementById('mov-monto').value        = '';
+  document.getElementById('mov-notas').value        = '';
+  document.getElementById('mov-cantidad-docs').value= '';
+  document.getElementById('mov-rut').value          = '';
   document.getElementById('mov-nombre-contraparte').value = '';
-  document.getElementById('campos-documentos').style.display = 'none';
-  document.getElementById('iva-preview').style.display = 'none';
+  document.getElementById('mov-cuenta-financiera').value  = '';
+  document.getElementById('mov-tipo-cambio').value        = '';
+  document.getElementById('mov-monto-clp-equiv').value    = '';
+  document.getElementById('mov-cuenta-info').style.display   = 'none';
+  document.getElementById('campos-tipo-cambio').style.display = 'none';
+  document.getElementById('campos-documentos').style.display  = 'none';
+  document.getElementById('iva-preview').style.display        = 'none';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -2031,6 +2147,7 @@ async function guardarNuevaCuenta() {
   if (data.error) { showToast(data.error, 'error'); return; }
   closeModal('modal-nueva-cuenta');
   showToast('✅ Cuenta creada correctamente');
+  _cuentasCache = []; // invalidar caché para que se recargue en el formulario
   await cargarCuentasFinancieras();
   if (document.getElementById('grid-cuentas')) cargarGridCuentas();
 }

@@ -836,7 +836,8 @@ def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
     Convierte las filas parseadas en dicts listos para guardar en MovimientoDiario.
     - monto: SIEMPRE en CLP
     - monto_moneda_orig: valor en moneda de la cuenta
-    - tipo_cambio: TC usado al importar o estimado
+    - tipo_cambio: TC usado al importar (None si no viene en la cartola)
+    - tc_estimado: True si el TC no vino en la cartola y se debe ingresar manualmente
     """
     movimientos = []
     for fila in resultado.filas:
@@ -848,9 +849,25 @@ def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
         monto_orig = fila.cargo if es_cargo else fila.abono
         moneda = getattr(fila, "moneda", "CLP") or "CLP"
         tipo_cambio = getattr(fila, "tipo_cambio", None)
+        tc_estimado = False
+
         if moneda != "CLP":
-            tc = tipo_cambio if tipo_cambio and tipo_cambio > 0 else Decimal("950")
-            monto_clp = monto_orig * tc
+            tipo_banco_lower = (fila.tipo_banco or "").lower()
+            # TC=1.00 en Global66 es un valor centinela para envíos sin conversión —
+            # no refleja el tipo de cambio real. Se ignora para esos casos.
+            tc_es_centinela = (
+                tipo_cambio == Decimal("1") or tipo_cambio == Decimal("1.00")
+            ) and any(p in tipo_banco_lower for p in ["envío", "envio", "comisión", "comision", "interés", "interes"])
+
+            if tipo_cambio and tipo_cambio > 1 and not tc_es_centinela:
+                # TC real proveniente de la cartola (conversiones)
+                tc = tipo_cambio
+                monto_clp = monto_orig * tc
+            else:
+                # Sin TC válido: guardar monto en moneda original y marcar para revisión manual
+                tc = None
+                tc_estimado = True
+                monto_clp = monto_orig  # se guardará en USD/moneda hasta que el usuario ingrese el TC
         else:
             tc = Decimal("1")
             monto_clp = monto_orig
@@ -869,7 +886,7 @@ def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
         nota_doc = f" | Doc: {fila.documento}" if fila.documento else ""
         nota_tipo = f" | Tipo: {fila.tipo_banco}" if fila.tipo_banco else ""
         nota_moneda = f" | Moneda: {moneda}"
-        nota_tc = f" | TC: {tc}" if tc else ""
+        nota_tc = f" | TC: {tc}" if tc else " | TC: pendiente (ingresar manualmente)"
 
         movimientos.append({
             "fecha": fila.fecha,
@@ -879,6 +896,7 @@ def convertir_a_movimientos(resultado: ResultadoImportacion) -> list:
             "monto_moneda_orig": monto_orig,
             "moneda": moneda,
             "tipo_cambio": tc,
+            "tc_estimado": tc_estimado,   # True = TC no disponible, requiere revisión manual
             "es_cargo": es_cargo,
             "medio_pago": "transferencia",
             "categoria_normalizada": categoria_normalizada,

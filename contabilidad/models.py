@@ -176,6 +176,7 @@ class MovimientoDiario(models.Model):
     moneda = models.CharField(max_length=5, choices=MONEDAS, default='CLP')
     monto_moneda_orig = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
     tipo_cambio = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    tc_pendiente = models.BooleanField(default=False)  # True = TC no vino en cartola, requiere ingreso manual
     importacion = models.ForeignKey(
         RegistroImportacion, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='movimientos'

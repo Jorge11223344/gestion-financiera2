@@ -168,6 +168,7 @@ def preview_cartola(request):
             mov["monto_moneda_orig"] = float(mov["monto_moneda_orig"])
         if mov.get("tipo_cambio") is not None:
             mov["tipo_cambio"] = float(mov["tipo_cambio"])
+        # tc_estimado ya viene como bool desde convertir_a_movimientos
 
     # Estadísticas del preview
     movs_reales = [m for m in movimientos_propuestos if not m.get("es_transferencia_interna")]
@@ -181,6 +182,7 @@ def preview_cartola(request):
     )
     duplicados = sum(1 for m in movimientos_propuestos if m["posible_duplicado"])
     transferencias_internas = sum(1 for m in movimientos_propuestos if m.get("es_transferencia_interna"))
+    tc_pendientes = sum(1 for m in movimientos_propuestos if m.get("tc_estimado"))
 
     return JsonResponse({
         "banco_detectado": resultado.banco_detectado,
@@ -196,7 +198,13 @@ def preview_cartola(request):
             "resultado": total_ingresos - total_egresos,
             "posibles_duplicados": duplicados,
             "transferencias_internas": transferencias_internas,
-        }
+            "tc_pendientes": tc_pendientes,
+        },
+        "aviso_tc": (
+            f"⚠️ {tc_pendientes} movimiento(s) en USD no tienen tipo de cambio en la cartola "
+            f"(comisiones, envíos, intereses). Puedes editarlos después de importar desde "
+            f"Historial → movimiento → editar TC."
+        ) if tc_pendientes > 0 else None,
     })
 
 
@@ -276,6 +284,7 @@ def confirmar_importacion(request):
                 moneda=moneda_mov,
                 monto_moneda_orig=monto_orig,
                 tipo_cambio=tipo_cambio,
+                tc_pendiente=mov.get("tc_estimado", False),
                 importacion=registro,
                 referencia_externa=mov.get("referencia_externa", "")[:100],
                 es_transferencia_interna=mov.get("es_transferencia_interna", False),
@@ -368,6 +377,11 @@ def revision_pendientes(request):
         categoria_normalizada='sin_clasificar'
     ).order_by('-fecha')[:50]
 
+    # Movimientos USD sin tipo de cambio definido
+    sin_tc = MovimientoDiario.objects.filter(
+        tc_pendiente=True
+    ).order_by('-fecha')[:50]
+
     posibles_transferencias = sugerir_emparejamientos()[:20]
 
     # Posibles duplicados: mismo monto y fecha, más de una vez
@@ -394,6 +408,17 @@ def revision_pendientes(request):
             }
             for m in sin_clasificar
         ],
+        "sin_tipo_cambio": [
+            {
+                "id": str(m.pk),
+                "fecha": str(m.fecha),
+                "descripcion": m.descripcion,
+                "monto_orig": float(m.monto_moneda_orig) if m.monto_moneda_orig else None,
+                "moneda": m.moneda,
+                "tipo_banco": m.clasificacion_razon,
+            }
+            for m in sin_tc
+        ],
         "posibles_transferencias": posibles_transferencias,
         "posibles_duplicados": [
             {
@@ -405,6 +430,7 @@ def revision_pendientes(request):
         ],
         "totales": {
             "sin_clasificar": MovimientoDiario.objects.filter(categoria_normalizada='sin_clasificar').count(),
+            "sin_tipo_cambio": MovimientoDiario.objects.filter(tc_pendiente=True).count(),
             "transferencias_sin_vincular": MovimientoDiario.objects.filter(
                 categoria_normalizada__in=['transferencia_interna', 'conversion_divisa'],
                 movimiento_relacionado__isnull=True
@@ -550,7 +576,8 @@ def tipo_cambio(request):
     if mov.monto_moneda_orig:
         mov.monto = mov.monto_moneda_orig * tc_decimal
     mov.tipo_cambio = tc_decimal
-    mov.save(update_fields=['tipo_cambio', 'monto'])
+    mov.tc_pendiente = False  # TC ya fue ingresado manualmente
+    mov.save(update_fields=['tipo_cambio', 'monto', 'tc_pendiente'])
 
     return JsonResponse({
         "ok":          True,

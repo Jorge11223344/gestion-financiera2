@@ -157,10 +157,13 @@ def movimientos(request):
     )
 
     return JsonResponse({
-        'id':         str(m.id),
-        'mensaje':    'Movimiento registrado exitosamente',
-        'monto_neto': int(monto_neto) if monto_neto else None,
-        'monto_iva':  int(monto_iva)  if monto_iva  else None,
+        'id':               str(m.id),
+        'mensaje':          'Movimiento registrado exitosamente',
+        'monto_neto':       int(monto_neto) if monto_neto else None,
+        'monto_iva':        int(monto_iva)  if monto_iva  else None,
+        'tipo_cambio_usado': float(tipo_cambio) if tipo_cambio else None,
+        'moneda':           moneda_mov,
+        'monto_clp':        int(monto_clp),
     }, status=201)
 
 
