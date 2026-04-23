@@ -13,6 +13,7 @@ urlpatterns = [
 
     # Dashboard y análisis
     path('api/dashboard', views.dashboard_data, name='dashboard'),
+    path('api/dashboard/cuentas/<str:cuenta_id>', views.dashboard_cuenta_detalle, name='dashboard_cuenta_detalle'),
     path('api/resumen/<int:anio>/<int:mes>', views.resumen_mensual, name='resumen_mensual'),
 
     # Cierres diarios

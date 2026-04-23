@@ -1430,19 +1430,19 @@ function fmtCuentaOrig(valor, moneda) {
   return `${moneda} ${n.toLocaleString('es-CL', { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 }
 
-function renderDetalleCuentas(detalleCuentas = []) {
-  const wrap = document.getElementById('detalle-cuentas-wrap');
-  if (!wrap) return;
-  if (!detalleCuentas.length) {
-    wrap.innerHTML = '<div class="empty">No hay cuentas financieras para auditar.</div>';
-    return;
-  }
+async function cargarMovimientosDetalleCuenta(cuentaId, page = 1) {
+  const tbody = document.getElementById(`detalle-cuenta-body-${cuentaId}`);
+  const pag = document.getElementById(`detalle-cuenta-pag-${cuentaId}`);
+  const info = document.getElementById(`detalle-cuenta-info-${cuentaId}`);
+  const cont = document.getElementById(`detalle-cuenta-cont-${cuentaId}`);
+  if (!tbody || !pag || !info || !cont) return;
 
-  wrap.innerHTML = detalleCuentas.map((c, idx) => {
-    const badgeTc = c.moneda === 'CLP' ? '' : `<span style="font-size:11px;color:var(--text2);">TC usado: ${fmt(c.tipo_cambio)}${c.tc_estimado ? ' (estimado)' : ''}</span>`;
-    const rows = (c.movimientos || []).map(m => {
+  tbody.innerHTML = '<tr><td colspan="5" class="loading">Cargando movimientos...</td></tr>';
+  try {
+    const data = await api(`/api/dashboard/cuentas/${cuentaId}?page=${page}&page_size=20`);
+    const rows = (data.movimientos || []).map(m => {
       const color = m.efecto === 'suma' ? 'var(--green)' : (m.efecto === 'resta' ? 'var(--red)' : 'var(--text2)');
-      const tag = m.es_transferencia_interna ? '<span class="badge badge-gray">Interna</span>' : '';
+      const tag = m.es_transferencia_interna ? '<span class="badge" style="background:rgba(148,163,184,.16);color:var(--text2);">Interna</span>' : '';
       return `<tr>
         <td style="white-space:nowrap;">${m.fecha}</td>
         <td style="min-width:220px;">${m.descripcion || '-'}<div style="font-size:11px;color:var(--text2);margin-top:2px;">${m.tipo_display} · ${m.categoria || 'sin_clasificar'} ${tag}</div></td>
@@ -1451,6 +1451,45 @@ function renderDetalleCuentas(detalleCuentas = []) {
         <td style="white-space:nowrap;color:${color};font-weight:700;">${m.signo} ${m.efecto}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="5" class="empty">Sin movimientos</td></tr>';
+
+    tbody.innerHTML = rows;
+    info.textContent = `Página ${data.page} de ${Math.max(data.pages || 1, 1)} · ${data.movimientos_count || 0} movimientos totales`;
+
+    const prevDisabled = data.page <= 1 ? 'disabled' : '';
+    const nextDisabled = data.page >= (data.pages || 1) ? 'disabled' : '';
+    pag.innerHTML = `
+      <button class="btn btn-secondary btn-sm" ${prevDisabled} onclick="cargarMovimientosDetalleCuenta('${cuentaId}', ${Math.max((data.page || 1) - 1, 1)})">← Anterior</button>
+      <button class="btn btn-secondary btn-sm" ${nextDisabled} onclick="cargarMovimientosDetalleCuenta('${cuentaId}', ${Math.min((data.page || 1) + 1, data.pages || 1)})">Siguiente →</button>
+    `;
+    cont.dataset.loaded = '1';
+    cont.dataset.page = String(data.page || 1);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">Error cargando movimientos: ${err.message}</td></tr>`;
+  }
+}
+
+function toggleMovimientosDetalleCuenta(cuentaId) {
+  const cont = document.getElementById(`detalle-cuenta-cont-${cuentaId}`);
+  const btn = document.getElementById(`detalle-cuenta-btn-${cuentaId}`);
+  if (!cont || !btn) return;
+  const visible = cont.style.display !== 'none';
+  cont.style.display = visible ? 'none' : 'block';
+  btn.textContent = visible ? 'Ver movimientos' : 'Ocultar movimientos';
+  if (!visible && cont.dataset.loaded !== '1') {
+    cargarMovimientosDetalleCuenta(cuentaId, 1);
+  }
+}
+
+function renderDetalleCuentas(detalleCuentas = []) {
+  const wrap = document.getElementById('detalle-cuentas-wrap');
+  if (!wrap) return;
+  if (!detalleCuentas.length) {
+    wrap.innerHTML = '<div class="empty">No hay cuentas financieras para auditar.</div>';
+    return;
+  }
+
+  wrap.innerHTML = detalleCuentas.map((c) => {
+    const badgeTc = c.moneda === 'CLP' ? '' : `<span style="font-size:11px;color:var(--text2);">TC usado: ${fmt(c.tipo_cambio)}${c.tc_estimado ? ' (estimado)' : ''}</span>`;
 
     return `<div class="card" style="background:rgba(15,23,42,.35);border:1px solid rgba(148,163,184,.18);margin-bottom:14px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
@@ -1469,21 +1508,32 @@ function renderDetalleCuentas(detalleCuentas = []) {
         <div class="stat-card-mini"><div class="stat-label">Saldo inicial</div><div class="stat-value" style="font-size:18px;">${fmtCuentaOrig(c.saldo_inicial_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.saldo_inicial_clp)} en CLP</div></div>
         <div class="stat-card-mini"><div class="stat-label">Ingresos</div><div class="stat-value stat-green" style="font-size:18px;">${fmtCuentaOrig(c.ingresos_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.ingresos_clp)} en CLP</div></div>
         <div class="stat-card-mini"><div class="stat-label">Egresos</div><div class="stat-value stat-red" style="font-size:18px;">${fmtCuentaOrig(c.egresos_orig, c.moneda)}</div><div class="stat-sub">${fmt(c.egresos_clp)} en CLP</div></div>
-        <div class="stat-card-mini"><div class="stat-label">Movimientos</div><div class="stat-value" style="font-size:18px;">${c.movimientos_count}</div><div class="stat-sub">Mostrando ${c.movimientos_mostrados}</div></div>
+        <div class="stat-card-mini"><div class="stat-label">Movimientos</div><div class="stat-value" style="font-size:18px;">${c.movimientos_count}</div><div class="stat-sub">Carga paginada de 20 en 20</div></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
         <div style="font-size:12px;color:var(--text2);">Fórmula: saldo inicial + ingresos - egresos</div>
-        ${badgeTc}
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          ${badgeTc}
+          <button class="btn btn-secondary btn-sm" id="detalle-cuenta-btn-${c.cuenta_id}" onclick="toggleMovimientosDetalleCuenta('${c.cuenta_id}')">Ver movimientos</button>
+        </div>
       </div>
 
-      <div class="tabla-wrapper">
-        <table>
-          <thead>
-            <tr><th>Fecha</th><th>Descripción</th><th>Monto moneda</th><th>Monto CLP</th><th>Efecto</th></tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div id="detalle-cuenta-cont-${c.cuenta_id}" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;">
+          <div id="detalle-cuenta-info-${c.cuenta_id}" style="font-size:12px;color:var(--text2);">Sin cargar</div>
+          <div id="detalle-cuenta-pag-${c.cuenta_id}" style="display:flex;gap:6px;"></div>
+        </div>
+        <div class="tabla-wrapper">
+          <table>
+            <thead>
+              <tr><th>Fecha</th><th>Descripción</th><th>Monto moneda</th><th>Monto CLP</th><th>Efecto</th></tr>
+            </thead>
+            <tbody id="detalle-cuenta-body-${c.cuenta_id}">
+              <tr><td colspan="5" class="empty">Abre esta cuenta para cargar sus movimientos.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>`;
   }).join('');

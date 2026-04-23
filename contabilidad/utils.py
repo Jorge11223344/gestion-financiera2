@@ -404,105 +404,129 @@ def calcular_iva(monto_bruto):
 # Debug auditable de cuentas
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_detalle_saldos_cuentas(limit_movimientos=25):
-    """
-    Devuelve un desglose auditable por cuenta financiera para entender
-    exactamente cómo se forma el saldo histórico que usa el dashboard.
+def _serializar_movimiento_detalle_cuenta(m):
+    neutro = _es_movimiento_neutro(m)
+    efecto = 'neutro' if neutro else ('suma' if m.tipo in _TIPOS_INGRESO else 'resta')
+    signo = '↔' if efecto == 'neutro' else ('+' if efecto == 'suma' else '-')
+    monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+    monto_clp = _monto_clp_robusto(m)
+    return {
+        'id': str(m.id),
+        'fecha': str(m.fecha),
+        'descripcion': m.descripcion,
+        'tipo': m.tipo,
+        'tipo_display': m.get_tipo_display(),
+        'categoria': m.categoria_normalizada,
+        'tercero': m.tercero,
+        'moneda': m.moneda,
+        'monto_clp': float(round(monto_clp, 2)),
+        'monto_moneda_orig': float(round(monto_orig, 4)) if monto_orig is not None else None,
+        'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio else None,
+        'es_transferencia_interna': bool(m.es_transferencia_interna),
+        'efecto': efecto,
+        'signo': signo,
+    }
 
-    IMPORTANTE:
-    - movimientos neutros se muestran en la tabla
-    - pero NO se suman en ingresos/egresos de la cuenta
-    """
+
+def _resumen_detalle_saldo_cuenta(cuenta):
+    from .models import MovimientoDiario
+
+    movs = (
+        MovimientoDiario.objects
+        .filter(cuenta_financiera=cuenta)
+        .order_by('-fecha', '-creado_en')
+    )
+
+    saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
+
+    if cuenta.moneda == 'CLP':
+        tc = Decimal('1')
+        tc_estimado = False
+        saldo_inicial_clp = saldo_inicial_orig
+    else:
+        tc = get_tc_vigente(cuenta.moneda)
+        tc_estimado = not movs.filter(tipo_cambio__isnull=False).exists()
+        saldo_inicial_clp = saldo_inicial_orig * tc
+
+    ingresos_orig = Decimal('0')
+    egresos_orig = Decimal('0')
+    ingresos_clp = Decimal('0')
+    egresos_clp = Decimal('0')
+
+    for m in movs:
+        if _es_movimiento_neutro(m):
+            continue
+
+        monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+        monto_clp = _monto_clp_robusto(m)
+
+        if m.tipo in _TIPOS_INGRESO:
+            ingresos_orig += Decimal(str(monto_orig or 0))
+            ingresos_clp += monto_clp
+        else:
+            egresos_orig += Decimal(str(monto_orig or 0))
+            egresos_clp += monto_clp
+
+    saldo_final_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
+    saldo_final_clp = saldo_inicial_clp + ingresos_clp - egresos_clp
+
+    return {
+        'cuenta_id': str(cuenta.pk),
+        'nombre': cuenta.nombre,
+        'institucion': cuenta.institucion,
+        'tipo_cuenta': cuenta.get_tipo_cuenta_display(),
+        'moneda': cuenta.moneda,
+        'saldo_inicial_orig': float(round(saldo_inicial_orig, 4)),
+        'saldo_inicial_clp': float(round(saldo_inicial_clp, 0)),
+        'ingresos_orig': float(round(ingresos_orig, 4)),
+        'egresos_orig': float(round(egresos_orig, 4)),
+        'ingresos_clp': float(round(ingresos_clp, 0)),
+        'egresos_clp': float(round(egresos_clp, 0)),
+        'saldo_final_orig': float(round(saldo_final_orig, 4)),
+        'saldo_final_clp': float(round(saldo_final_clp, 0)),
+        'tipo_cambio': float(tc),
+        'tc_estimado': tc_estimado,
+        'movimientos_count': movs.count(),
+    }
+
+
+def get_detalle_saldo_cuenta_paginado(cuenta_id, page=1, page_size=20):
     from .models import MovimientoDiario, CuentaFinanciera
 
-    detalle = []
-    for cuenta in CuentaFinanciera.objects.filter(activa=True):
-        movs = (
-            MovimientoDiario.objects
-            .filter(cuenta_financiera=cuenta)
-            .order_by('-fecha', '-creado_en')
-        )
+    cuenta = CuentaFinanciera.objects.get(pk=cuenta_id, activa=True)
+    resumen = _resumen_detalle_saldo_cuenta(cuenta)
 
-        saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
+    page = max(int(page or 1), 1)
+    page_size = max(1, min(int(page_size or 20), 100))
 
-        if cuenta.moneda == 'CLP':
-            tc = Decimal('1')
-            tc_estimado = False
-            saldo_inicial_clp = saldo_inicial_orig
-        else:
-            tc = get_tc_vigente(cuenta.moneda)
-            tc_estimado = not movs.filter(tipo_cambio__isnull=False).exists()
-            saldo_inicial_clp = saldo_inicial_orig * tc
+    movs = (
+        MovimientoDiario.objects
+        .filter(cuenta_financiera=cuenta)
+        .order_by('-fecha', '-creado_en')
+    )
+    total = movs.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = [_serializar_movimiento_detalle_cuenta(m) for m in movs[start:end]]
 
-        ingresos_orig = Decimal('0')
-        egresos_orig = Decimal('0')
-        ingresos_clp = Decimal('0')
-        egresos_clp = Decimal('0')
+    return {
+        **resumen,
+        'page': page,
+        'page_size': page_size,
+        'pages': (total + page_size - 1) // page_size,
+        'movimientos_mostrados': len(items),
+        'movimientos': items,
+    }
 
-        movimientos_detalle = []
-        for m in movs[:limit_movimientos]:
-            neutro = _es_movimiento_neutro(m)
-            efecto = 'neutro' if neutro else ('suma' if m.tipo in _TIPOS_INGRESO else 'resta')
-            signo = '↔' if efecto == 'neutro' else ('+' if efecto == 'suma' else '-')
 
-            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = _monto_clp_robusto(m)
+def get_detalle_saldos_cuentas():
+    """
+    Devuelve solo el resumen por cuenta para el dashboard.
+    Los movimientos se cargan por separado con paginación para no inflar la respuesta.
+    """
+    from .models import CuentaFinanciera
 
-            movimientos_detalle.append({
-                'id': str(m.id),
-                'fecha': str(m.fecha),
-                'descripcion': m.descripcion,
-                'tipo': m.tipo,
-                'tipo_display': m.get_tipo_display(),
-                'categoria': m.categoria_normalizada,
-                'tercero': m.tercero,
-                'moneda': m.moneda,
-                'monto_clp': float(round(monto_clp, 2)),
-                'monto_moneda_orig': float(round(monto_orig, 4)) if monto_orig is not None else None,
-                'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio else None,
-                'es_transferencia_interna': bool(m.es_transferencia_interna),
-                'efecto': efecto,
-                'signo': signo,
-            })
-
-        for m in movs:
-            if _es_movimiento_neutro(m):
-                continue
-
-            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
-            monto_clp = _monto_clp_robusto(m)
-
-            if m.tipo in _TIPOS_INGRESO:
-                ingresos_orig += Decimal(str(monto_orig or 0))
-                ingresos_clp += monto_clp
-            else:
-                egresos_orig += Decimal(str(monto_orig or 0))
-                egresos_clp += monto_clp
-
-        saldo_final_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
-        saldo_final_clp = saldo_inicial_clp + ingresos_clp - egresos_clp
-
-        detalle.append({
-            'cuenta_id': str(cuenta.pk),
-            'nombre': cuenta.nombre,
-            'institucion': cuenta.institucion,
-            'tipo_cuenta': cuenta.get_tipo_cuenta_display(),
-            'moneda': cuenta.moneda,
-            'saldo_inicial_orig': float(round(saldo_inicial_orig, 4)),
-            'saldo_inicial_clp': float(round(saldo_inicial_clp, 0)),
-            'ingresos_orig': float(round(ingresos_orig, 4)),
-            'egresos_orig': float(round(egresos_orig, 4)),
-            'ingresos_clp': float(round(ingresos_clp, 0)),
-            'egresos_clp': float(round(egresos_clp, 0)),
-            'saldo_final_orig': float(round(saldo_final_orig, 4)),
-            'saldo_final_clp': float(round(saldo_final_clp, 0)),
-            'tipo_cambio': float(tc),
-            'tc_estimado': tc_estimado,
-            'movimientos_count': movs.count(),
-            'movimientos_mostrados': len(movimientos_detalle),
-            'movimientos': movimientos_detalle,
-        })
-
+    detalle = [_resumen_detalle_saldo_cuenta(cuenta) for cuenta in CuentaFinanciera.objects.filter(activa=True)]
     detalle.sort(key=lambda x: abs(x['saldo_final_clp']), reverse=True)
     return detalle
 

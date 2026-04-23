@@ -13,7 +13,8 @@ from .models import (MovimientoDiario, CierreDiario, PresupuestoMensual,
                      ConfiguracionEmpresa, CuentaContable, CentroCosto)
 from .utils import (get_resumen_periodo, get_flujo_mensual, get_ventas_por_dia,
                     get_distribucion_gastos, get_kpis_salud, calcular_iva,
-                    get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas)
+                    get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas,
+                    get_detalle_saldo_cuenta_paginado)
 
 
 def index(request):
@@ -290,6 +291,17 @@ def movimiento_detalle(request, mov_id):
 # ──────────────────────────────────────────────
 # DASHBOARD
 # ──────────────────────────────────────────────
+
+@require_http_methods(["GET"])
+def dashboard_cuenta_detalle(request, cuenta_id):
+    page = request.GET.get('page', 1)
+    page_size = request.GET.get('page_size', 20)
+    try:
+        detalle = get_detalle_saldo_cuenta_paginado(cuenta_id, page=page, page_size=page_size)
+        return JsonResponse(detalle)
+    except Exception as exc:
+        return JsonResponse({'error': str(exc)}, status=404)
+
 
 def dashboard_data(request):
     hoy         = date.today()
