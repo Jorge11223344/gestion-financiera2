@@ -1,0 +1,606 @@
+"""
+Utilidades financieras para KPIs y métricas de salud empresarial.
+
+ARQUITECTURA MONETARIA:
+  Cada movimiento guarda SIEMPRE:
+    - monto_moneda_orig  → valor en moneda original (USD, EUR, CLP)
+    - moneda             → moneda original
+    - tipo_cambio        → TC usado al registrar
+    - monto              → equivalente en CLP (monto_base_clp)
+
+  Los reportes tienen DOS miradas:
+    1. Por moneda original (para revisar proveedores extranjeros en USD)
+    2. Consolidado en CLP (para el P&L y dashboard general)
+"""
+from decimal import Decimal
+from django.db.models import Sum, Q
+import calendar
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Constantes
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TIPOS_INGRESO = [
+    'ingreso_caja', 'ingreso_banco', 'suma_boletas',
+    'suma_facturas_emitidas', 'prestamo_recibido', 'otro_ingreso'
+]
+
+_CATEGORIAS_NEUTRAS = {'transferencia_interna', 'conversion_divisa'}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers internos
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _qs_operacional(qs):
+    """
+    Excluye transferencias internas y conversiones de divisa.
+    Estas NO afectan el P&L — solo mueven dinero entre cuentas propias.
+    """
+    return qs.filter(
+        es_transferencia_interna=False,
+    ).exclude(
+        categoria_normalizada__in=_CATEGORIAS_NEUTRAS
+    )
+
+
+def _es_movimiento_neutro(movimiento) -> bool:
+    """
+    Un movimiento es neutro para análisis de saldo por cuenta cuando:
+    - está marcado como transferencia interna, o
+    - su categoría es transferencia_interna / conversion_divisa
+
+    Se muestra en el detalle, pero NO debe inflar ingresos/egresos.
+    """
+    return bool(
+        getattr(movimiento, 'es_transferencia_interna', False) or
+        getattr(movimiento, 'categoria_normalizada', None) in _CATEGORIAS_NEUTRAS
+    )
+
+
+def get_tc_vigente(moneda: str) -> Decimal:
+    """
+    Tipo de cambio vigente para consolidar en CLP.
+
+    Estrategia: usa el ÚLTIMO tipo_cambio registrado en movimientos reales.
+    Si no hay ninguno aún, usa fallback conservador.
+    """
+    if moneda == 'CLP':
+        return Decimal('1')
+
+    from .models import MovimientoDiario
+    ultimo = (
+        MovimientoDiario.objects
+        .filter(moneda=moneda, tipo_cambio__isnull=False)
+        .order_by('-fecha', '-creado_en')
+        .values('tipo_cambio')
+        .first()
+    )
+    if ultimo:
+        return Decimal(str(ultimo['tipo_cambio']))
+
+    FALLBACKS = {'USD': Decimal('950'), 'EUR': Decimal('1030')}
+    return FALLBACKS.get(moneda, Decimal('1'))
+
+
+def _monto_clp(movimiento) -> Decimal:
+    """
+    Retorna el monto en CLP de un movimiento.
+    El campo `monto` debe ser SIEMPRE el monto_base_clp.
+    """
+    return Decimal(str(movimiento.monto or 0))
+
+
+def _monto_clp_robusto(movimiento) -> Decimal:
+    """
+    Para movimientos en moneda extranjera, intenta reconstruir CLP desde
+    monto_moneda_orig * tipo_cambio cuando el monto guardado parezca venir
+    aún en moneda original.
+    """
+    monto = Decimal(str(movimiento.monto or 0))
+    moneda = getattr(movimiento, 'moneda', 'CLP') or 'CLP'
+    monto_orig = getattr(movimiento, 'monto_moneda_orig', None)
+    tc = getattr(movimiento, 'tipo_cambio', None)
+
+    if moneda != 'CLP' and monto_orig not in (None, '') and tc not in (None, ''):
+        try:
+            monto_orig_d = Decimal(str(monto_orig))
+            tc_d = Decimal(str(tc))
+            reconstruido = monto_orig_d * tc_d
+            # Si el monto guardado es demasiado pequeño respecto al reconstruido,
+            # asumimos que quedó grabado en moneda original.
+            if reconstruido > 0 and (monto <= (reconstruido / Decimal('10'))):
+                return reconstruido
+        except Exception:
+            pass
+    return monto
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resumen del período (P&L)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_resumen_periodo(fecha_desde, fecha_hasta):
+    """
+    Estado de resultados del período.
+    SIEMPRE en CLP (campo `monto` = monto_base_clp).
+    Excluye transferencias internas y conversiones de divisa.
+    """
+    from .models import MovimientoDiario
+
+    movs = _qs_operacional(
+        MovimientoDiario.objects.filter(
+            fecha__gte=fecha_desde,
+            fecha__lte=fecha_hasta
+        )
+    )
+
+    total_ingresos = (
+        movs.filter(tipo__in=_TIPOS_INGRESO)
+        .aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    )
+    total_egresos = (
+        movs.exclude(tipo__in=_TIPOS_INGRESO)
+        .aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    )
+
+    ventas = movs.filter(
+        Q(tipo__in=['suma_boletas', 'suma_facturas_emitidas']) |
+        Q(categoria_normalizada='venta')
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    costos = movs.filter(
+        Q(tipo='suma_facturas_recibidas') |
+        Q(categoria_normalizada__in=['pago_proveedor', 'pago_importacion'])
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    remuneraciones = movs.filter(
+        Q(tipo='remuneracion') |
+        Q(categoria_normalizada='remuneracion_norm')
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    impuestos = movs.filter(
+        Q(tipo='impuesto') |
+        Q(categoria_normalizada='pago_impuesto')
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    logistica = movs.filter(
+        categoria_normalizada='gasto_logistica'
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    comisiones = movs.filter(
+        categoria_normalizada='comision_bancaria'
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    intereses = movs.filter(
+        categoria_normalizada='interes_ganado'
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    aportes_socio = movs.filter(
+        categoria_normalizada='aporte_socio'
+    ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    utilidad_bruta = ventas - costos
+    utilidad_operacional = utilidad_bruta - remuneraciones - impuestos - logistica - comisiones
+    resultado_neto = total_ingresos - total_egresos
+
+    base_margen = ventas + intereses + aportes_socio
+
+    margen_bruto = (utilidad_bruta / ventas * 100) if ventas > 0 else Decimal('0')
+    margen_operacional = (utilidad_operacional / ventas * 100) if ventas > 0 else Decimal('0')
+    margen_neto = (resultado_neto / base_margen * 100) if base_margen > 0 else Decimal('0')
+
+    return {
+        'total_ingresos': total_ingresos,
+        'total_egresos': total_egresos,
+        'ventas': ventas,
+        'costos': costos,
+        'remuneraciones': remuneraciones,
+        'impuestos': impuestos,
+        'logistica': logistica,
+        'comisiones': comisiones,
+        'intereses': intereses,
+        'aportes_socio': aportes_socio,
+        'utilidad_bruta': utilidad_bruta,
+        'utilidad_operacional': utilidad_operacional,
+        'resultado_neto': resultado_neto,
+        'margen_bruto': round(margen_bruto, 1),
+        'margen_operacional': round(margen_operacional, 1),
+        'margen_neto': round(margen_neto, 1),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flujo mensual
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_flujo_mensual(anio, meses=12):
+    from .models import MovimientoDiario
+
+    resultado = []
+    for mes in range(1, meses + 1):
+        movs = _qs_operacional(
+            MovimientoDiario.objects.filter(fecha__year=anio, fecha__month=mes)
+        )
+        ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+        egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+        resultado.append({
+            'mes': mes,
+            'mes_nombre': calendar.month_abbr[mes],
+            'ingresos': int(ingresos),
+            'egresos': int(egresos),
+            'resultado': int(ingresos - egresos),
+        })
+    return resultado
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ventas por día
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_ventas_por_dia(fecha_desde, fecha_hasta):
+    from .models import MovimientoDiario
+
+    tipos_venta = [
+        'suma_boletas', 'suma_facturas_emitidas',
+        'ingreso_caja', 'ingreso_banco', 'otro_ingreso'
+    ]
+    data = (
+        _qs_operacional(
+            MovimientoDiario.objects.filter(
+                fecha__gte=fecha_desde,
+                fecha__lte=fecha_hasta
+            )
+        )
+        .filter(tipo__in=tipos_venta)
+        .values('fecha')
+        .annotate(total=Sum('monto'))
+        .order_by('fecha')
+    )
+    return [{'fecha': str(d['fecha']), 'total': int(d['total'])} for d in data]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Distribución de gastos
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_distribucion_gastos(fecha_desde, fecha_hasta):
+    from .models import MovimientoDiario
+
+    CATEGORIAS_GASTOS = {
+        'pago_importacion': 'Importaciones',
+        'pago_proveedor': 'Proveedores',
+        'remuneracion_norm': 'Remuneraciones',
+        'gasto_logistica': 'Logística',
+        'pago_impuesto': 'Impuestos',
+        'comision_bancaria': 'Comisiones Bancarias',
+        'gasto_operacional': 'Gastos Operacionales',
+        'pago_prestamo_norm': 'Cuotas Préstamo',
+    }
+
+    resultado = []
+    movs = _qs_operacional(
+        MovimientoDiario.objects.filter(
+            fecha__gte=fecha_desde,
+            fecha__lte=fecha_hasta
+        )
+    )
+
+    for cat, label in CATEGORIAS_GASTOS.items():
+        total = movs.filter(categoria_normalizada=cat).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+        if total > 0:
+            resultado.append({'categoria': label, 'total': int(total)})
+
+    tipos_egreso_legacy = {
+        'suma_facturas_recibidas': 'Compras',
+        'remuneracion': 'Remuneraciones',
+        'impuesto': 'Impuestos',
+        'egreso_caja': 'Gastos Caja',
+        'egreso_banco': 'Gastos Banco',
+        'otro_egreso': 'Otros Gastos',
+    }
+    for tipo, label in tipos_egreso_legacy.items():
+        total = movs.filter(
+            tipo=tipo, categoria_normalizada='sin_clasificar'
+        ).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+        if total > 0:
+            resultado.append({'categoria': label, 'total': int(total)})
+
+    return sorted(resultado, key=lambda x: x['total'], reverse=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KPIs de salud financiera
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_kpis_salud(fecha_desde, fecha_hasta):
+    resumen = get_resumen_periodo(fecha_desde, fecha_hasta)
+    ventas = resumen['ventas']
+    resultado = resumen['resultado_neto']
+    remuneraciones = resumen['remuneraciones']
+    total_egresos = resumen['total_egresos']
+
+    kpis = []
+
+    if resultado > 0:
+        estado, mensaje = 'verde', 'La empresa está generando ganancias'
+    elif resultado == 0:
+        estado, mensaje = 'amarillo', 'La empresa está en punto de equilibrio'
+    else:
+        estado, mensaje = 'rojo', 'La empresa está perdiendo dinero'
+    kpis.append({
+        'nombre': 'Resultado del Período',
+        'valor': f"${int(resultado):,}".replace(',', '.'),
+        'estado': estado, 'mensaje': mensaje, 'icono': '💰',
+    })
+
+    mb = float(resumen['margen_bruto'])
+    estado = 'verde' if mb >= 40 else 'amarillo' if mb >= 20 else 'rojo'
+    mensajes = {
+        'verde': 'Margen saludable sobre el 40%',
+        'amarillo': 'Margen aceptable, revisar costos',
+        'rojo': 'Margen crítico, costos muy altos',
+    }
+    kpis.append({
+        'nombre': 'Margen Bruto', 'valor': f"{mb:.1f}%",
+        'estado': estado, 'mensaje': mensajes[estado], 'icono': '📊',
+    })
+
+    if ventas > 0:
+        peso_rem = float(remuneraciones / ventas * 100)
+        estado = 'verde' if peso_rem <= 30 else 'amarillo' if peso_rem <= 50 else 'rojo'
+        msgs_rem = {
+            'verde': 'Carga laboral controlada',
+            'amarillo': 'Carga laboral elevada',
+            'rojo': 'Remuneraciones consumen más del 50% de ventas',
+        }
+        kpis.append({
+            'nombre': 'Remuneraciones / Ventas', 'valor': f"{peso_rem:.1f}%",
+            'estado': estado, 'mensaje': msgs_rem[estado], 'icono': '👥',
+        })
+
+    if total_egresos > 0:
+        cobertura = float(ventas / total_egresos)
+        estado = 'verde' if cobertura >= 1.2 else 'amarillo' if cobertura >= 1.0 else 'rojo'
+        msgs_cob = {
+            'verde': 'Las ventas cubren holgadamente los gastos',
+            'amarillo': 'Las ventas apenas cubren los gastos',
+            'rojo': 'Las ventas no alcanzan a cubrir los gastos',
+        }
+        kpis.append({
+            'nombre': 'Cobertura de Gastos', 'valor': f"{cobertura:.2f}x",
+            'estado': estado, 'mensaje': msgs_cob[estado], 'icono': '🛡️',
+        })
+
+    dias = (fecha_hasta - fecha_desde).days + 1
+    if dias > 0 and ventas > 0:
+        venta_diaria = float(ventas) / dias
+        if venta_diaria > 0:
+            dias_pe = float(remuneraciones) / venta_diaria
+            kpis.append({
+                'nombre': 'Días para Punto de Equilibrio',
+                'valor': f"{int(dias_pe)} días/mes",
+                'estado': 'verde' if dias_pe < 20 else 'amarillo' if dias_pe < 26 else 'rojo',
+                'mensaje': f"Necesitas vender {int(dias_pe)} días del mes solo para cubrir sueldos",
+                'icono': '📅',
+            })
+
+    return kpis
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IVA
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calcular_iva(monto_bruto):
+    TASA_IVA = Decimal('0.19')
+    neto = round(monto_bruto / (1 + TASA_IVA))
+    iva = monto_bruto - neto
+    return {'neto': neto, 'iva': iva, 'bruto': monto_bruto}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debug auditable de cuentas
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_detalle_saldos_cuentas(limit_movimientos=25):
+    """
+    Devuelve un desglose auditable por cuenta financiera para entender
+    exactamente cómo se forma el saldo histórico que usa el dashboard.
+
+    IMPORTANTE:
+    - movimientos neutros se muestran en la tabla
+    - pero NO se suman en ingresos/egresos de la cuenta
+    """
+    from .models import MovimientoDiario, CuentaFinanciera
+
+    detalle = []
+    for cuenta in CuentaFinanciera.objects.filter(activa=True):
+        movs = (
+            MovimientoDiario.objects
+            .filter(cuenta_financiera=cuenta)
+            .order_by('-fecha', '-creado_en')
+        )
+
+        saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
+
+        if cuenta.moneda == 'CLP':
+            tc = Decimal('1')
+            tc_estimado = False
+            saldo_inicial_clp = saldo_inicial_orig
+        else:
+            tc = get_tc_vigente(cuenta.moneda)
+            tc_estimado = not movs.filter(tipo_cambio__isnull=False).exists()
+            saldo_inicial_clp = saldo_inicial_orig * tc
+
+        ingresos_orig = Decimal('0')
+        egresos_orig = Decimal('0')
+        ingresos_clp = Decimal('0')
+        egresos_clp = Decimal('0')
+
+        movimientos_detalle = []
+        for m in movs[:limit_movimientos]:
+            neutro = _es_movimiento_neutro(m)
+            efecto = 'neutro' if neutro else ('suma' if m.tipo in _TIPOS_INGRESO else 'resta')
+            signo = '↔' if efecto == 'neutro' else ('+' if efecto == 'suma' else '-')
+
+            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+            monto_clp = _monto_clp_robusto(m)
+
+            movimientos_detalle.append({
+                'id': str(m.id),
+                'fecha': str(m.fecha),
+                'descripcion': m.descripcion,
+                'tipo': m.tipo,
+                'tipo_display': m.get_tipo_display(),
+                'categoria': m.categoria_normalizada,
+                'tercero': m.tercero,
+                'moneda': m.moneda,
+                'monto_clp': float(round(monto_clp, 2)),
+                'monto_moneda_orig': float(round(monto_orig, 4)) if monto_orig is not None else None,
+                'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio else None,
+                'es_transferencia_interna': bool(m.es_transferencia_interna),
+                'efecto': efecto,
+                'signo': signo,
+            })
+
+        for m in movs:
+            if _es_movimiento_neutro(m):
+                continue
+
+            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+            monto_clp = _monto_clp_robusto(m)
+
+            if m.tipo in _TIPOS_INGRESO:
+                ingresos_orig += Decimal(str(monto_orig or 0))
+                ingresos_clp += monto_clp
+            else:
+                egresos_orig += Decimal(str(monto_orig or 0))
+                egresos_clp += monto_clp
+
+        saldo_final_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
+        saldo_final_clp = saldo_inicial_clp + ingresos_clp - egresos_clp
+
+        detalle.append({
+            'cuenta_id': str(cuenta.pk),
+            'nombre': cuenta.nombre,
+            'institucion': cuenta.institucion,
+            'tipo_cuenta': cuenta.get_tipo_cuenta_display(),
+            'moneda': cuenta.moneda,
+            'saldo_inicial_orig': float(round(saldo_inicial_orig, 4)),
+            'saldo_inicial_clp': float(round(saldo_inicial_clp, 0)),
+            'ingresos_orig': float(round(ingresos_orig, 4)),
+            'egresos_orig': float(round(egresos_orig, 4)),
+            'ingresos_clp': float(round(ingresos_clp, 0)),
+            'egresos_clp': float(round(egresos_clp, 0)),
+            'saldo_final_orig': float(round(saldo_final_orig, 4)),
+            'saldo_final_clp': float(round(saldo_final_clp, 0)),
+            'tipo_cambio': float(tc),
+            'tc_estimado': tc_estimado,
+            'movimientos_count': movs.count(),
+            'movimientos_mostrados': len(movimientos_detalle),
+            'movimientos': movimientos_detalle,
+        })
+
+    detalle.sort(key=lambda x: abs(x['saldo_final_clp']), reverse=True)
+    return detalle
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Saldo actual consolidado
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_saldo_actual():
+    """
+    Saldo total consolidado en CLP.
+
+    Nota:
+    - movimientos sin cuenta asignada siguen entrando como legacy
+    - movimientos con cuenta sí consolidan por cuenta
+    - las transferencias internas siguen afectando caja total si están
+      registradas sin duplicación entre cuentas
+    """
+    from .models import MovimientoDiario, ConfiguracionEmpresa, CuentaFinanciera
+
+    config = ConfiguracionEmpresa.get()
+
+    movs_sin_cuenta = MovimientoDiario.objects.filter(cuenta_financiera__isnull=True)
+    ing_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+    egr_sc = sum((_monto_clp_robusto(m) for m in movs_sin_cuenta.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+    saldo_legacy = config.saldo_inicial_caja + config.saldo_inicial_banco + ing_sc - egr_sc
+
+    saldo_cuentas = Decimal('0')
+    for cuenta in CuentaFinanciera.objects.filter(activa=True):
+        movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
+        ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+        egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+
+        if cuenta.moneda == 'CLP':
+            saldo_inicial_clp = cuenta.saldo_inicial
+        else:
+            tc = get_tc_vigente(cuenta.moneda)
+            saldo_inicial_clp = cuenta.saldo_inicial * tc
+
+        saldo_cuentas += saldo_inicial_clp + ingresos - egresos
+
+    return saldo_legacy + saldo_cuentas
+
+
+def get_saldo_por_cuenta():
+    """
+    Saldo por cuenta financiera con dos miradas:
+      - saldo: moneda original
+      - saldo_clp: equivalente consolidado en CLP
+
+    A diferencia de la versión anterior, esta excluye movimientos neutros
+    del cálculo de ingresos/egresos por cuenta.
+    """
+    from .models import MovimientoDiario, CuentaFinanciera
+
+    resultado = []
+    for cuenta in CuentaFinanciera.objects.filter(activa=True):
+        movs = MovimientoDiario.objects.filter(cuenta_financiera=cuenta)
+        saldo_inicial_orig = Decimal(str(cuenta.saldo_inicial or 0))
+
+        if cuenta.moneda == 'CLP':
+            tc = Decimal('1')
+            tc_estimado = False
+        else:
+            tc = get_tc_vigente(cuenta.moneda)
+            tc_estimado = not movs.filter(tipo_cambio__isnull=False).exists()
+
+        ingresos_orig = Decimal('0')
+        egresos_orig = Decimal('0')
+        ingresos_clp = Decimal('0')
+        egresos_clp = Decimal('0')
+
+        for m in movs:
+            if _es_movimiento_neutro(m):
+                continue
+
+            monto_orig = m.monto_moneda_orig if m.monto_moneda_orig is not None else m.monto
+            monto_clp = _monto_clp_robusto(m)
+
+            if m.tipo in _TIPOS_INGRESO:
+                ingresos_orig += Decimal(str(monto_orig or 0))
+                ingresos_clp += monto_clp
+            else:
+                egresos_orig += Decimal(str(monto_orig or 0))
+                egresos_clp += monto_clp
+
+        saldo_orig = saldo_inicial_orig + ingresos_orig - egresos_orig
+        saldo_clp = (saldo_inicial_orig * tc) + ingresos_clp - egresos_clp
+
+        resultado.append({
+            'cuenta_id': str(cuenta.pk),
+            'nombre': cuenta.nombre,
+            'institucion': cuenta.institucion,
+            'moneda': cuenta.moneda,
+            'saldo': float(round(saldo_orig, 4)),
+            'saldo_clp': float(round(saldo_clp, 0)),
+            'tipo_cambio': float(tc),
+            'tc_estimado': tc_estimado,
+        })
+
+    return resultado

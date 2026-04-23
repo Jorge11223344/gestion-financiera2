@@ -327,18 +327,21 @@ def confirmar_importacion(request):
 
 @require_http_methods(["GET"])
 def historial_importaciones(request):
-    registros = RegistroImportacion.objects.select_related('cuenta_financiera')[:50]
+    registros = RegistroImportacion.objects.select_related('cuenta_financiera').all()[:100]
     return JsonResponse({"importaciones": [
         {
             "id": str(r.pk),
             "nombre_archivo": r.nombre_archivo,
             "banco_detectado": r.banco_detectado,
             "cuenta": str(r.cuenta_financiera) if r.cuenta_financiera else "—",
+            "cuenta_financiera_id": str(r.cuenta_financiera_id) if r.cuenta_financiera_id else None,
             "fecha": r.fecha_importacion.strftime('%d/%m/%Y %H:%M'),
+            "total_filas_archivo": r.total_filas_archivo,
             "total_importados": r.total_importados,
             "total_duplicados": r.total_duplicados,
             "total_errores": r.total_errores,
             "estado": r.estado,
+            "advertencias": r.advertencias or [],
         }
         for r in registros
     ]})
@@ -347,7 +350,6 @@ def historial_importaciones(request):
 @csrf_exempt
 @require_http_methods(["GET", "PUT", "DELETE"])
 def importacion_detalle(request, importacion_id):
-    """CRUD de una importación específica."""
     try:
         registro = RegistroImportacion.objects.select_related('cuenta_financiera').get(pk=importacion_id)
     except RegistroImportacion.DoesNotExist:
@@ -358,9 +360,9 @@ def importacion_detalle(request, importacion_id):
             "id": str(registro.pk),
             "nombre_archivo": registro.nombre_archivo,
             "banco_detectado": registro.banco_detectado,
-            "cuenta": str(registro.cuenta_financiera) if registro.cuenta_financiera else "—",
             "cuenta_financiera_id": str(registro.cuenta_financiera_id) if registro.cuenta_financiera_id else None,
-            "fecha": registro.fecha_importacion.isoformat(timespec='minutes'),
+            "cuenta": str(registro.cuenta_financiera) if registro.cuenta_financiera else "—",
+            "fecha": registro.fecha_importacion.strftime('%d/%m/%Y %H:%M'),
             "total_filas_archivo": registro.total_filas_archivo,
             "total_importados": registro.total_importados,
             "total_duplicados": registro.total_duplicados,
@@ -371,44 +373,36 @@ def importacion_detalle(request, importacion_id):
 
     if request.method == "PUT":
         try:
-            body = json.loads(request.body or '{}')
+            body = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({"error": "JSON inválido"}, status=400)
 
-        nombre_archivo = (body.get("nombre_archivo") or "").strip()
-        if nombre_archivo:
-            registro.nombre_archivo = nombre_archivo
-
-        registro.banco_detectado = (body.get("banco_detectado") or registro.banco_detectado or "").strip()
-
-        estado = body.get("estado")
-        estados_validos = {k for k, _ in RegistroImportacion.ESTADOS}
-        if estado:
-            if estado not in estados_validos:
-                return JsonResponse({"error": "Estado inválido"}, status=400)
-            registro.estado = estado
-
-        cuenta_id = body.get("cuenta_financiera_id")
-        if "cuenta_financiera_id" in body:
-            if cuenta_id in (None, "", "null"):
-                registro.cuenta_financiera = None
-                MovimientoDiario.objects.filter(importacion=registro).update(cuenta_financiera=None)
-            else:
+        if 'nombre_archivo' in body:
+            registro.nombre_archivo = (body.get('nombre_archivo') or '').strip()[:255]
+        if 'banco_detectado' in body:
+            registro.banco_detectado = (body.get('banco_detectado') or '').strip()[:100]
+        if 'estado' in body and body.get('estado') in dict(RegistroImportacion.ESTADOS):
+            registro.estado = body['estado']
+        if 'cuenta_financiera_id' in body:
+            cuenta_id = body.get('cuenta_financiera_id')
+            if cuenta_id:
                 try:
-                    cuenta = CuentaFinanciera.objects.get(pk=cuenta_id)
+                    registro.cuenta_financiera = CuentaFinanciera.objects.get(pk=cuenta_id)
                 except CuentaFinanciera.DoesNotExist:
                     return JsonResponse({"error": "Cuenta financiera no encontrada"}, status=404)
-                registro.cuenta_financiera = cuenta
-                MovimientoDiario.objects.filter(importacion=registro).update(cuenta_financiera=cuenta, moneda=cuenta.moneda)
+            else:
+                registro.cuenta_financiera = None
 
         registro.save()
-        return JsonResponse({"mensaje": "Importación actualizada"})
+        return JsonResponse({"ok": True, "mensaje": "Importación actualizada"})
 
     eliminados = MovimientoDiario.objects.filter(importacion=registro).delete()[0]
-    nombre_archivo = registro.nombre_archivo
+    registro.estado = 'revertido'
+    registro.save(update_fields=['estado'])
     registro.delete()
     return JsonResponse({
-        "mensaje": f"✅ Se eliminó la cartola {nombre_archivo} y {eliminados} movimiento(s) asociados.",
+        "ok": True,
+        "mensaje": f"✅ Importación eliminada. {eliminados} movimientos eliminados.",
         "eliminados": eliminados,
     })
 

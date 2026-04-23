@@ -10,7 +10,7 @@ from django.db.models import Sum, Q
 import calendar
 
 from .models import (MovimientoDiario, CierreDiario, PresupuestoMensual,
-                     ConfiguracionEmpresa, CuentaContable, CentroCosto)
+                     ConfiguracionEmpresa, CuentaContable, CentroCosto, CuentaFinanciera)
 from .utils import (get_resumen_periodo, get_flujo_mensual, get_ventas_por_dia,
                     get_distribucion_gastos, get_kpis_salud, calcular_iva,
                     get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas)
@@ -85,6 +85,8 @@ def movimientos(request):
             'monto_iva':             float(m.monto_iva)  if m.monto_iva  else None,
             'notas':                 m.notas,
             'es_ingreso':            m.es_ingreso,
+            'importacion_id':         str(m.importacion_id) if m.importacion_id else None,
+            'importacion_nombre':     m.importacion.nombre_archivo if m.importacion_id else None,
         } for m in qs]
 
         return JsonResponse({'movimientos': data, 'total': len(data)})
@@ -191,6 +193,14 @@ def movimiento_detalle(request, mov_id):
             'es_transferencia_interna': m.es_transferencia_interna,
             'referencia_externa':    m.referencia_externa,
             'notas':                 m.notas,
+            'medio_pago':            m.medio_pago,
+            'cantidad_documentos':   m.cantidad_documentos,
+            'rut_contraparte':       m.rut_contraparte,
+            'nombre_contraparte':    m.nombre_contraparte,
+            'monto_neto':            float(m.monto_neto) if m.monto_neto else None,
+            'monto_iva':             float(m.monto_iva) if m.monto_iva else None,
+            'cuenta_financiera_id':  str(m.cuenta_financiera_id) if m.cuenta_financiera_id else None,
+            'importacion_id':        str(m.importacion_id) if m.importacion_id else None,
         })
 
     if request.method == 'DELETE':
@@ -213,26 +223,84 @@ def movimiento_detalle(request, mov_id):
         if field in body:
             setattr(m, field, body[field])
 
-    # Recalcular monto_base_clp si cambia monto o tipo_cambio
-    if 'monto' in body or 'tipo_cambio' in body:
-        nuevo_monto = Decimal(str(body.get('monto', float(m.monto_moneda_orig or m.monto))))
-        nuevo_tc    = Decimal(str(body.get('tipo_cambio', float(m.tipo_cambio or 1))))
-
-        if m.moneda != 'CLP' and nuevo_tc > 1:
-            m.monto_moneda_orig = nuevo_monto
-            m.tipo_cambio       = nuevo_tc
-            m.monto             = nuevo_monto * nuevo_tc   # recalcular monto_base_clp
+    if 'cuenta_financiera_id' in body:
+        cuenta_id = body.get('cuenta_financiera_id')
+        if cuenta_id:
+            try:
+                m.cuenta_financiera = CuentaFinanciera.objects.get(pk=cuenta_id)
+                if m.cuenta_financiera and m.cuenta_financiera.moneda:
+                    m.moneda = m.cuenta_financiera.moneda
+            except CuentaFinanciera.DoesNotExist:
+                return JsonResponse({'error': 'Cuenta financiera no encontrada'}, status=404)
         else:
-            m.monto = nuevo_monto
+            m.cuenta_financiera = None
+            m.moneda = 'CLP'
 
-        # Recalcular IVA si aplica
-        if m.tipo in ['suma_facturas_emitidas', 'suma_facturas_recibidas']:
-            info      = calcular_iva(m.monto)
-            m.monto_neto = info['neto']
-            m.monto_iva  = info['iva']
+    if 'moneda' in body and body.get('moneda') in ['CLP', 'USD', 'EUR']:
+        m.moneda = body['moneda']
+
+    def _to_decimal(value, default=None):
+        if value in (None, '', 'null'):
+            return default
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return default
+
+    nuevo_tc = _to_decimal(body.get('tipo_cambio'), m.tipo_cambio)
+    nuevo_orig = _to_decimal(body.get('monto_moneda_orig'), m.monto_moneda_orig)
+    nuevo_clp = _to_decimal(body.get('monto_clp'), None)
+
+    if 'monto' in body and nuevo_clp is None:
+        nuevo_clp = _to_decimal(body.get('monto'), m.monto)
+
+    if m.moneda != 'CLP':
+        if nuevo_orig is None and nuevo_clp is None:
+            nuevo_orig = m.monto_moneda_orig
+            nuevo_clp = m.monto
+        elif nuevo_orig is None and nuevo_clp is not None:
+            if nuevo_tc and nuevo_tc > 0:
+                nuevo_orig = nuevo_clp / nuevo_tc
+        elif nuevo_orig is not None and nuevo_clp is None:
+            if nuevo_tc and nuevo_tc > 0:
+                nuevo_clp = nuevo_orig * nuevo_tc
+
+        m.monto_moneda_orig = nuevo_orig
+        m.tipo_cambio = nuevo_tc if nuevo_tc and nuevo_tc > 0 else None
+        if nuevo_clp is not None:
+            m.monto = nuevo_clp
+        elif nuevo_orig is not None and m.tipo_cambio:
+            m.monto = nuevo_orig * m.tipo_cambio
+        m.tc_pendiente = bool(m.moneda != 'CLP' and not m.tipo_cambio)
+    else:
+        if nuevo_clp is None:
+            nuevo_clp = _to_decimal(body.get('monto'), m.monto)
+        if nuevo_clp is not None:
+            m.monto = nuevo_clp
+        m.monto_moneda_orig = None
+        m.tipo_cambio = None
+        m.tc_pendiente = False
+
+    if m.tipo in ['suma_facturas_emitidas', 'suma_facturas_recibidas']:
+        info = calcular_iva(m.monto)
+        m.monto_neto = info['neto']
+        m.monto_iva = info['iva']
+    elif 'monto_neto' in body:
+        m.monto_neto = _to_decimal(body.get('monto_neto'))
+    elif 'monto_iva' in body:
+        m.monto_iva = _to_decimal(body.get('monto_iva'))
 
     m.save()
-    return JsonResponse({'mensaje': 'Actualizado'})
+    return JsonResponse({
+        'mensaje': 'Actualizado',
+        'movimiento': {
+            'id': str(m.id),
+            'monto': float(m.monto),
+            'monto_moneda_orig': float(m.monto_moneda_orig) if m.monto_moneda_orig is not None else None,
+            'tipo_cambio': float(m.tipo_cambio) if m.tipo_cambio is not None else None,
+            'moneda': m.moneda,
+        }
+    })
 
 
 # ──────────────────────────────────────────────

@@ -1156,11 +1156,35 @@ function closeModal(id) {
 }
 
 async function api(url, opts = {}) {
+  const headers = { 'X-CSRFToken': getCookie('csrftoken'), ...(opts.headers || {}) };
+  if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const resp = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
     ...opts,
+    headers,
   });
-  return resp.json();
+
+  const contentType = resp.headers.get('content-type') || '';
+  let data = null;
+
+  if (contentType.includes('application/json')) {
+    data = await resp.json();
+  } else {
+    const text = await resp.text();
+    data = {
+      error: resp.ok ? 'Respuesta no válida del servidor' : `Error ${resp.status}: no se encontró la ruta o la respuesta no es JSON`,
+      raw: text,
+      status: resp.status,
+    };
+  }
+
+  if (!resp.ok && !data.error) {
+    data.error = `Error ${resp.status}`;
+  }
+
+  return data;
 }
 
 function getCookie(name) {
