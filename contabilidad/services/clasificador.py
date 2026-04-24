@@ -169,9 +169,20 @@ def clasificar_movimiento(
     if "traspaso de:" in desc or "traspaso de :" in desc:
         nombre_orig = desc.split(":", 1)[-1].strip().title() if ":" in desc else ""
         tercero = nombre_orig
-        return {"categoria_normalizada": "aporte_socio" if _es_nombre_persona(nombre_orig) else "ingreso_banco",
-                "es_transferencia_interna": False,
-                "confianza": "media", "razon": "Traspaso recibido", "tercero": tercero}
+        d = nombre_orig.lower()
+
+        # Regla operacional Arenita/JIMACOMEX:
+        # Todo TRASPASO DE recibido en Banco de Chile se considera venta,
+        # salvo que venga claramente desde una cuenta propia.
+        # Los aportes de socio reales se corrigen puntualmente en el historial.
+        if any(p in d for p in _PROPIOS):
+            return {"categoria_normalizada": "transferencia_interna", "es_transferencia_interna": True,
+                    "confianza": "alta", "razon": "Traspaso recibido desde cuenta/empresa propia",
+                    "tercero": tercero}
+
+        return {"categoria_normalizada": "venta", "es_transferencia_interna": False,
+                "confianza": "alta", "razon": "Traspaso recibido clasificado automáticamente como venta",
+                "tercero": tercero}
 
     # Banco de Chile: PAGO con abonos
     if "pago:" in desc and ("abono" in desc or "debito" in desc or "crédito" in desc):

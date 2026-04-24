@@ -49,11 +49,20 @@ def cuentas_financieras(request):
                 "titular": c.titular,
                 "numero_parcial": c.numero_parcial,
                 "saldo_inicial": float(c.saldo_inicial),
-                # Saldo que se muestra en tarjetas de cuentas.
-                # Para CLP debe leer saldo_clp; antes usaba "saldo" y podía no reflejar transferencias internas.
-                "saldo_actual": float((saldos.get(str(c.pk)) or {}).get('saldo_clp', 0) or 0),
+                # Saldo financiero de la cuenta.
+                # saldo_actual = saldo en la moneda propia de la cuenta.
+                # saldo_actual_clp = equivalente consolidado en CLP.
+                "saldo_actual": float((saldos.get(str(c.pk)) or {}).get('saldo', 0) or 0),
                 "saldo_original": float((saldos.get(str(c.pk)) or {}).get('saldo', 0) or 0),
                 "saldo_actual_clp": float((saldos.get(str(c.pk)) or {}).get('saldo_clp', 0) or 0),
+                "saldo_inicial_clp": float((saldos.get(str(c.pk)) or {}).get('saldo_inicial_clp', 0) or 0),
+                "ingresos_orig": float((saldos.get(str(c.pk)) or {}).get('ingresos_orig', 0) or 0),
+                "egresos_orig": float((saldos.get(str(c.pk)) or {}).get('egresos_orig', 0) or 0),
+                "ingresos_clp": float((saldos.get(str(c.pk)) or {}).get('ingresos_clp', 0) or 0),
+                "egresos_clp": float((saldos.get(str(c.pk)) or {}).get('egresos_clp', 0) or 0),
+                "transferencias_internas_clp": float((saldos.get(str(c.pk)) or {}).get('transferencias_internas_clp', 0) or 0),
+                "transferencias_internas_count": int((saldos.get(str(c.pk)) or {}).get('transferencias_internas_count', 0) or 0),
+                "movimientos_count": int((saldos.get(str(c.pk)) or {}).get('movimientos_count', 0) or 0),
                 "tipo_cambio": float((saldos.get(str(c.pk)) or {}).get('tipo_cambio', 1) or 1),
                 "tc_estimado": bool((saldos.get(str(c.pk)) or {}).get('tc_estimado', False)),
             }

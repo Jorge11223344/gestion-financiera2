@@ -314,6 +314,32 @@
     </div>
   </div>
 
+  <!-- Flujo interno financiero: depósitos entre cuentas propias -->
+  <div class="card" style="margin-top:-8px;margin-bottom:24px;border-left:4px solid var(--blue);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+      <div>
+        <div class="stat-label">🔁 Transferencias internas del período</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.5;">
+          Depósitos entre cuentas propias y conversiones CLP/USD. Afectan saldos, pero no la utilidad.
+        </div>
+      </div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;">
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Recibidas</div>
+          <div id="stat-transf-recibidas" style="color:var(--green);font-weight:700;font-size:18px;">-</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Enviadas</div>
+          <div id="stat-transf-enviadas" style="color:var(--red);font-weight:700;font-size:18px;">-</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Neto interno</div>
+          <div id="stat-transf-neto" style="font-weight:700;font-size:18px;">-</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- KPIs salud financiera -->
   <div class="flex-between">
     <h3 style="font-size:16px;font-weight:700;">🏥 Salud Financiera</h3>
@@ -1785,6 +1811,19 @@ async function cargarDashboard() {
   document.getElementById('stat-egresos').textContent = fmt(data.resumen.total_egresos);
   document.getElementById('stat-costos-sub').textContent = `Compras: ${fmt(data.resumen.costos)}`;
 
+  const trRec = Number(data.resumen.transferencias_recibidas || 0);
+  const trEnv = Number(data.resumen.transferencias_enviadas || 0);
+  const trNet = Number(data.resumen.transferencias_neto || 0);
+  const elTrRec = document.getElementById('stat-transf-recibidas');
+  const elTrEnv = document.getElementById('stat-transf-enviadas');
+  const elTrNet = document.getElementById('stat-transf-neto');
+  if (elTrRec) elTrRec.textContent = fmt(trRec);
+  if (elTrEnv) elTrEnv.textContent = fmt(trEnv);
+  if (elTrNet) {
+    elTrNet.textContent = fmt(trNet);
+    elTrNet.style.color = trNet >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+
   const res = data.resumen.resultado_neto;
   const resEl = document.getElementById('stat-resultado');
   resEl.textContent = fmt(res);
@@ -2390,6 +2429,10 @@ async function cargarKpis() {
       ${r.intereses > 0 ? `<tr>
         <td style="padding:5px 6px;color:var(--text2);font-size:12px;">  + Intereses Ganados</td>
         <td style="text-align:right;color:var(--green);padding:5px 6px;">${fmtR(r.intereses)}</td>
+      </tr>` : ''}
+      ${(r.transferencias_recibidas || r.transferencias_enviadas) ? `<tr style="background:rgba(59,130,246,.06);">
+        <td style="padding:5px 6px;color:var(--text2);font-size:12px;">↔ Transferencias internas recibidas / enviadas</td>
+        <td style="text-align:right;color:var(--blue);padding:5px 6px;">${fmtR(r.transferencias_recibidas || 0)} / ${fmtR(r.transferencias_enviadas || 0)}</td>
       </tr>` : ''}
       <tr>
         <td style="padding:5px 6px;color:var(--text2);">(-) Costo de Ventas / Importaciones</td>

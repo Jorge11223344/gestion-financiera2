@@ -47,11 +47,13 @@ def _qs_operacional(qs):
 
 def _es_movimiento_neutro(movimiento) -> bool:
     """
-    Un movimiento es neutro para análisis de saldo por cuenta cuando:
+    Un movimiento es neutro SOLO para resultado/P&L cuando:
     - está marcado como transferencia interna, o
-    - su categoría es transferencia_interna / conversion_divisa
+    - su categoría es transferencia_interna / conversion_divisa.
 
-    Se muestra en el detalle, pero NO debe inflar ingresos/egresos.
+    Regla ERP importante:
+    - Saldos por cuenta: SÍ incluyen estos movimientos.
+    - Resultado/utilidad: NO los incluye.
     """
     return bool(
         getattr(movimiento, 'es_transferencia_interna', False) or
@@ -129,12 +131,29 @@ def get_resumen_periodo(fecha_desde, fecha_hasta):
     """
     from .models import MovimientoDiario
 
-    movs = _qs_operacional(
-        MovimientoDiario.objects.filter(
-            fecha__gte=fecha_desde,
-            fecha__lte=fecha_hasta
-        )
+    movs_base = MovimientoDiario.objects.filter(
+        fecha__gte=fecha_desde,
+        fecha__lte=fecha_hasta
     )
+
+    # P&L operacional: excluye transferencias internas y conversiones.
+    movs = _qs_operacional(movs_base)
+
+    # Flujo interno financiero: NO afecta resultado, pero sí explica depósitos
+    # entre cuentas propias, como Banco Chile → Global66 CLP y CLP → USD.
+    movs_internos = movs_base.filter(
+        Q(es_transferencia_interna=True) |
+        Q(categoria_normalizada__in=_CATEGORIAS_NEUTRAS)
+    )
+    transferencias_recibidas = (
+        movs_internos.filter(tipo__in=_TIPOS_INGRESO)
+        .aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    )
+    transferencias_enviadas = (
+        movs_internos.exclude(tipo__in=_TIPOS_INGRESO)
+        .aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    )
+    transferencias_neto = transferencias_recibidas - transferencias_enviadas
 
     total_ingresos = (
         movs.filter(tipo__in=_TIPOS_INGRESO)
@@ -202,6 +221,9 @@ def get_resumen_periodo(fecha_desde, fecha_hasta):
         'comisiones': comisiones,
         'intereses': intereses,
         'aportes_socio': aportes_socio,
+        'transferencias_recibidas': transferencias_recibidas,
+        'transferencias_enviadas': transferencias_enviadas,
+        'transferencias_neto': transferencias_neto,
         'utilidad_bruta': utilidad_bruta,
         'utilidad_operacional': utilidad_operacional,
         'resultado_neto': resultado_neto,
@@ -626,14 +648,21 @@ def get_saldo_por_cuenta():
             'nombre': resumen['nombre'],
             'institucion': resumen['institucion'],
             'moneda': resumen['moneda'],
-            'saldo': resumen['saldo'],
-            'saldo_clp': resumen['saldo_clp'],
+            'saldo_inicial_orig': resumen['saldo_inicial_orig'],
+            'saldo_inicial_clp': resumen['saldo_inicial_clp'],
+            'ingresos_orig': resumen['ingresos_orig'],
+            'egresos_orig': resumen['egresos_orig'],
+            'ingresos_clp': resumen['ingresos_clp'],
+            'egresos_clp': resumen['egresos_clp'],
+            'saldo': resumen['saldo'],                 # saldo en moneda de la cuenta
+            'saldo_clp': resumen['saldo_clp'],         # saldo equivalente CLP
             'saldo_final_orig': resumen['saldo_final_orig'],
             'saldo_final_clp': resumen['saldo_final_clp'],
             'tipo_cambio': resumen['tipo_cambio'],
             'tc_estimado': resumen['tc_estimado'],
             'transferencias_internas_clp': resumen['transferencias_internas_clp'],
             'transferencias_internas_count': resumen['transferencias_internas_count'],
+            'movimientos_count': resumen['movimientos_count'],
         })
 
     return resultado
