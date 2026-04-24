@@ -335,37 +335,71 @@ def _tipo_cambio_referencia(cuenta, saldos_cta=None):
 def _serialize_control(control, saldos_cta=None):
     if not control:
         return None
+
     saldos_cta = saldos_cta or []
     saldos_map = {c['id']: c for c in saldos_cta}
     detalles = []
+
+    # Totales CLP referenciales. Incluyen equivalentes de cuentas USD/EUR,
+    # pero no se usan para validar diferencias de cuentas en moneda extranjera.
     total_real_clp = Decimal('0')
     total_sistema_clp = Decimal('0')
 
+    # Totales conciliables en CLP: solo cuentas CLP + pendiente efectivo.
+    total_real_conciliable_clp = Decimal('0')
+    total_sistema_conciliable_clp = Decimal('0')
+    diferencias_por_moneda = {}
+
     for det in control.detalles.select_related('cuenta_financiera').all():
         cuenta = det.cuenta_financiera
+        moneda = cuenta.moneda or 'CLP'
         sistema = saldos_map.get(str(cuenta.id), {})
         tc = _tipo_cambio_referencia(cuenta, saldos_cta)
+
         saldo_real_orig = Decimal(str(det.saldo_real or 0))
-        saldo_real_clp = saldo_real_orig if cuenta.moneda == 'CLP' else saldo_real_orig * tc
-        saldo_sistema_orig = Decimal(str(sistema.get('saldo', 0)))
-        saldo_sistema_clp = Decimal(str(sistema.get('saldo_clp', 0)))
+        saldo_sistema_orig = Decimal(str(sistema.get('saldo', 0) or 0))
+        saldo_sistema_clp = Decimal(str(sistema.get('saldo_clp', 0) or 0))
+        saldo_real_clp = saldo_real_orig if moneda == 'CLP' else saldo_real_orig * tc
+
         total_real_clp += saldo_real_clp
         total_sistema_clp += saldo_sistema_clp
+
+        diferencia_orig = saldo_real_orig - saldo_sistema_orig
+        diferencia_clp_referencial = saldo_real_clp - saldo_sistema_clp
+
+        if moneda == 'CLP':
+            diferencia_conciliacion = diferencia_clp_referencial
+            unidad_conciliacion = 'CLP'
+            diferencia_clp_es_referencial = False
+            total_real_conciliable_clp += saldo_real_orig
+            total_sistema_conciliable_clp += saldo_sistema_clp
+        else:
+            diferencia_conciliacion = diferencia_orig
+            unidad_conciliacion = moneda
+            diferencia_clp_es_referencial = True
+            diferencias_por_moneda[moneda] = diferencias_por_moneda.get(moneda, Decimal('0')) + diferencia_orig
+
         detalles.append({
             'cuenta_id': str(cuenta.id),
             'cuenta_nombre': cuenta.nombre,
             'institucion': cuenta.institucion,
-            'moneda': cuenta.moneda,
+            'moneda': moneda,
             'saldo_real_orig': float(round(saldo_real_orig, 4)),
             'saldo_real_clp': float(round(saldo_real_clp, 0)),
-            'saldo_sistema_orig': float(sistema.get('saldo', 0) or 0),
-            'saldo_sistema_clp': float(sistema.get('saldo_clp', 0) or 0),
-            'diferencia_orig': float(round(saldo_real_orig - saldo_sistema_orig, 4)),
-            'diferencia_clp': float(round(saldo_real_clp - saldo_sistema_clp, 0)),
+            'saldo_sistema_orig': float(round(saldo_sistema_orig, 4)),
+            'saldo_sistema_clp': float(round(saldo_sistema_clp, 0)),
+            'diferencia_orig': float(round(diferencia_orig, 4)),
+            'diferencia_clp': float(round(diferencia_clp_referencial, 0)),
+            'diferencia_conciliacion': float(round(diferencia_conciliacion, 4 if unidad_conciliacion != 'CLP' else 0)),
+            'unidad_conciliacion': unidad_conciliacion,
+            'diferencia_clp_referencial': float(round(diferencia_clp_referencial, 0)),
+            'diferencia_clp_es_referencial': diferencia_clp_es_referencial,
             'tipo_cambio_ref': float(tc),
         })
 
     pendiente = Decimal(str(control.pendiente_efectivo_clp or 0))
+    diferencia_total_clp = total_real_conciliable_clp + pendiente - total_sistema_conciliable_clp
+
     return {
         'id': control.id,
         'fecha': str(control.fecha),
@@ -374,7 +408,13 @@ def _serialize_control(control, saldos_cta=None):
         'detalles': detalles,
         'total_real_clp': float(round(total_real_clp, 0)),
         'total_sistema_clp': float(round(total_sistema_clp, 0)),
-        'diferencia_total_clp': float(round(total_real_clp + pendiente - total_sistema_clp, 0)),
+        'total_real_clp_referencial': float(round(total_real_clp, 0)),
+        'total_sistema_clp_referencial': float(round(total_sistema_clp, 0)),
+        'total_real_conciliable_clp': float(round(total_real_conciliable_clp + pendiente, 0)),
+        'total_sistema_conciliable_clp': float(round(total_sistema_conciliable_clp, 0)),
+        'diferencia_total_clp': float(round(diferencia_total_clp, 0)),
+        'diferencias_por_moneda': {moneda: float(round(valor, 4)) for moneda, valor in diferencias_por_moneda.items()},
+        'nota_multimoneda': 'Las cuentas en moneda extranjera se concilian en su moneda original; el CLP es solo referencial.',
     }
 
 

@@ -314,6 +314,32 @@
     </div>
   </div>
 
+  <!-- Flujo interno financiero: depósitos entre cuentas propias -->
+  <div class="card" style="margin-top:-8px;margin-bottom:24px;border-left:4px solid var(--blue);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+      <div>
+        <div class="stat-label">🔁 Transferencias internas del período</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.5;">
+          Depósitos entre cuentas propias y conversiones CLP/USD. Afectan saldos, pero no la utilidad.
+        </div>
+      </div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;">
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Recibidas</div>
+          <div id="stat-transf-recibidas" style="color:var(--green);font-weight:700;font-size:18px;">-</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Enviadas</div>
+          <div id="stat-transf-enviadas" style="color:var(--red);font-weight:700;font-size:18px;">-</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;text-transform:uppercase;">Neto interno</div>
+          <div id="stat-transf-neto" style="font-weight:700;font-size:18px;">-</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- KPIs salud financiera -->
   <div class="flex-between">
     <h3 style="font-size:16px;font-weight:700;">🏥 Salud Financiera</h3>
@@ -1515,6 +1541,19 @@ function fmtCuentaOrig(valor, moneda) {
   return `${moneda} ${n.toLocaleString('es-CL', { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
 }
 
+function fmtDiferenciaConciliacion(d) {
+  const unidad = d.unidad_conciliacion || d.moneda || 'CLP';
+  const valor = Number(d.diferencia_conciliacion ?? (unidad === 'CLP' ? d.diferencia_clp : d.diferencia_orig) ?? 0);
+  if (unidad === 'CLP') return fmt(valor);
+  return fmtCuentaOrig(valor, unidad);
+}
+
+function colorDiferenciaConciliacion(d) {
+  const unidad = d.unidad_conciliacion || d.moneda || 'CLP';
+  const valor = Number(d.diferencia_conciliacion ?? (unidad === 'CLP' ? d.diferencia_clp : d.diferencia_orig) ?? 0);
+  return valor === 0 ? 'var(--text2)' : (valor > 0 ? 'var(--green)' : 'var(--red)');
+}
+
 async function cargarMovimientosDetalleCuenta(cuentaId, page = 1) {
   const tbody = document.getElementById(`detalle-cuenta-body-${cuentaId}`);
   const pag = document.getElementById(`detalle-cuenta-pag-${cuentaId}`);
@@ -1637,20 +1676,21 @@ function renderDashboardControlSaldos(control) {
       <td>${d.moneda}</td>
       <td>${fmtCuentaOrig(d.saldo_sistema_orig, d.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(d.saldo_sistema_clp)} CLP</div></td>
       <td>${fmtCuentaOrig(d.saldo_real_orig, d.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(d.saldo_real_clp)} CLP</div></td>
-      <td style="font-weight:700;color:${(d.diferencia_clp||0)===0?'var(--text)':((d.diferencia_clp||0)>0?'var(--green)':'var(--red)')};">${fmt(d.diferencia_clp || 0)}</td>
+      <td style="font-weight:700;color:${colorDiferenciaConciliacion(d)};">${fmtDiferenciaConciliacion(d)}${d.diferencia_clp_es_referencial ? `<div style="font-size:11px;color:var(--text2);font-weight:400;">Ref. CLP: ${fmt(d.diferencia_clp_referencial || 0)}</div>` : ''}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin detalle.</td></tr>';
   el.innerHTML = `
     <div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Fecha control: <strong style="color:var(--text)">${control.fecha}</strong> · Pendiente efectivo: <strong style="color:var(--yellow)">${fmt(control.pendiente_efectivo_clp || 0)}</strong></div>
     <div class="tabla-wrapper">
       <table>
-        <thead><tr><th>Cuenta</th><th>Moneda</th><th>Sistema</th><th>Real</th><th>Diferencia CLP</th></tr></thead>
+        <thead><tr><th>Cuenta</th><th>Moneda</th><th>Sistema</th><th>Real</th><th>Diferencia</th></tr></thead>
         <tbody>${detalle}</tbody>
       </table>
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:13px;">
-      <div>Total sistema: <strong>${fmt(control.total_sistema_clp || 0)}</strong></div>
-      <div>Total real: <strong>${fmt((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0))}</strong></div>
-      <div>Diferencia: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+      <div>Sistema CLP conciliable: <strong>${fmt(control.total_sistema_conciliable_clp ?? control.total_sistema_clp ?? 0)}</strong></div>
+      <div>Real CLP + pendiente: <strong>${fmt(control.total_real_conciliable_clp ?? ((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0)))}</strong></div>
+      <div>Diferencia CLP: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+      <div style="width:100%;font-size:12px;color:var(--text2);">${control.nota_multimoneda || 'Las cuentas en moneda extranjera se concilian en su moneda original.'}</div>
     </div>`;
 }
 
@@ -1674,14 +1714,15 @@ function renderControlSaldosForm(control, cuentasSistema) {
   (control?.detalles || []).forEach(d => controlMap[d.cuenta_id] = d);
   tbody.innerHTML = (cuentasSistema || []).map(c => {
     const real = controlMap[c.id]?.saldo_real_orig ?? c.saldo;
-    const diff = (controlMap[c.id]?.diferencia_clp ?? 0);
+    const diffObj = controlMap[c.id] || { moneda: c.moneda, unidad_conciliacion: c.moneda === 'CLP' ? 'CLP' : c.moneda, diferencia_conciliacion: 0 };
+    const diff = Number(diffObj.diferencia_conciliacion ?? 0);
     return `
       <tr>
         <td>${c.nombre}<div style="font-size:11px;color:var(--text2);">${c.institucion}</div></td>
         <td>${c.moneda}</td>
         <td>${fmtCuentaOrig(c.saldo, c.moneda)}<div style="font-size:11px;color:var(--text2);">${fmt(c.saldo_clp)} CLP</div></td>
         <td><input type="number" step="0.0001" data-cuenta-id="${c.id}" data-moneda="${c.moneda}" value="${real ?? 0}" style="min-width:120px;" /></td>
-        <td style="font-weight:700;color:${diff===0?'var(--text2)':(diff>0?'var(--green)':'var(--red)')};">${fmt(diff || 0)}</td>
+        <td style="font-weight:700;color:${colorDiferenciaConciliacion(diffObj)};">${fmtDiferenciaConciliacion(diffObj)}</td>
       </tr>`;
   }).join('') || '<tr><td colspan="5" class="empty">No hay cuentas activas.</td></tr>';
 }
@@ -1711,10 +1752,11 @@ function renderControlSaldosResumen(control) {
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
       <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Fecha</div><div class="stat-value" style="font-size:18px;">${control.fecha}</div></div>
-      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Sistema</div><div class="stat-value stat-blue" style="font-size:18px;">${fmt(control.total_sistema_clp || 0)}</div></div>
-      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Real + pendiente</div><div class="stat-value" style="font-size:18px;color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0))}</div></div>
+      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Sistema CLP conciliable</div><div class="stat-value stat-blue" style="font-size:18px;">${fmt(control.total_sistema_conciliable_clp ?? control.total_sistema_clp ?? 0)}</div></div>
+      <div class="card" style="background:var(--bg3);padding:14px;"><div class="stat-label">Real CLP + pendiente</div><div class="stat-value" style="font-size:18px;color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.total_real_conciliable_clp ?? ((control.total_real_clp || 0) + (control.pendiente_efectivo_clp || 0)))}</div></div>
     </div>
-    <div style="margin-top:14px;font-size:13px;color:var(--text2);">Diferencia total: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+    <div style="margin-top:14px;font-size:13px;color:var(--text2);">Diferencia CLP conciliable: <strong style="color:${(control.diferencia_total_clp||0)>=0?'var(--green)':'var(--red)'};">${fmt(control.diferencia_total_clp || 0)}</strong></div>
+    <div style="margin-top:6px;font-size:12px;color:var(--text2);">${control.nota_multimoneda || 'Las cuentas en moneda extranjera se concilian en su moneda original; el CLP es referencial.'}</div>
     ${control.notas ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);">Notas: ${control.notas}</div>` : ''}`;
 }
 
@@ -1784,6 +1826,19 @@ async function cargarDashboard() {
   document.getElementById('stat-ventas-sub').textContent = `Ventas: ${fmt(data.resumen.ventas)}`;
   document.getElementById('stat-egresos').textContent = fmt(data.resumen.total_egresos);
   document.getElementById('stat-costos-sub').textContent = `Compras: ${fmt(data.resumen.costos)}`;
+
+  const trRec = Number(data.resumen.transferencias_recibidas || 0);
+  const trEnv = Number(data.resumen.transferencias_enviadas || 0);
+  const trNet = Number(data.resumen.transferencias_neto || 0);
+  const elTrRec = document.getElementById('stat-transf-recibidas');
+  const elTrEnv = document.getElementById('stat-transf-enviadas');
+  const elTrNet = document.getElementById('stat-transf-neto');
+  if (elTrRec) elTrRec.textContent = fmt(trRec);
+  if (elTrEnv) elTrEnv.textContent = fmt(trEnv);
+  if (elTrNet) {
+    elTrNet.textContent = fmt(trNet);
+    elTrNet.style.color = trNet >= 0 ? 'var(--green)' : 'var(--red)';
+  }
 
   const res = data.resumen.resultado_neto;
   const resEl = document.getElementById('stat-resultado');
@@ -2390,6 +2445,10 @@ async function cargarKpis() {
       ${r.intereses > 0 ? `<tr>
         <td style="padding:5px 6px;color:var(--text2);font-size:12px;">  + Intereses Ganados</td>
         <td style="text-align:right;color:var(--green);padding:5px 6px;">${fmtR(r.intereses)}</td>
+      </tr>` : ''}
+      ${(r.transferencias_recibidas || r.transferencias_enviadas) ? `<tr style="background:rgba(59,130,246,.06);">
+        <td style="padding:5px 6px;color:var(--text2);font-size:12px;">↔ Transferencias internas recibidas / enviadas</td>
+        <td style="text-align:right;color:var(--blue);padding:5px 6px;">${fmtR(r.transferencias_recibidas || 0)} / ${fmtR(r.transferencias_enviadas || 0)}</td>
       </tr>` : ''}
       <tr>
         <td style="padding:5px 6px;color:var(--text2);">(-) Costo de Ventas / Importaciones</td>
