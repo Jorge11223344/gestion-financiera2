@@ -238,18 +238,74 @@ def get_resumen_periodo(fecha_desde, fecha_hasta):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_flujo_mensual(anio, meses=12):
+    """
+    Flujo mensual para un año completo.
+
+    Se mantiene por compatibilidad con otras partes del sistema, pero el
+    dashboard debe usar get_flujo_mensual_periodo() para respetar los filtros
+    de fecha enviados desde la pantalla.
+    """
+    from datetime import date
+
+    return get_flujo_mensual_periodo(
+        date(anio, 1, 1),
+        date(anio, min(meses, 12), calendar.monthrange(anio, min(meses, 12))[1])
+    )
+
+
+def _iter_meses(fecha_desde, fecha_hasta):
+    """Itera mes a mes entre dos fechas, incluyendo los extremos."""
+    y, m = fecha_desde.year, fecha_desde.month
+    while (y, m) <= (fecha_hasta.year, fecha_hasta.month):
+        yield y, m
+        if m == 12:
+            y += 1
+            m = 1
+        else:
+            m += 1
+
+
+def get_flujo_mensual_periodo(fecha_desde, fecha_hasta):
+    """
+    Flujo mensual respetando el rango solicitado por el filtro del dashboard.
+
+    Antes el gráfico usaba siempre date.today().year desde la vista, por eso
+    quedaba fijo en 2026 y no respondía al selector/filtro de fechas. Esta
+    función calcula cada mes dentro del período real solicitado.
+    """
+    from datetime import date
     from .models import MovimientoDiario
 
+    if fecha_hasta < fecha_desde:
+        fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
     resultado = []
-    for mes in range(1, meses + 1):
+    for anio, mes in _iter_meses(fecha_desde, fecha_hasta):
+        primer_dia_mes = date(anio, mes, 1)
+        ultimo_dia_mes = date(anio, mes, calendar.monthrange(anio, mes)[1])
+
+        desde_mes = max(fecha_desde, primer_dia_mes)
+        hasta_mes = min(fecha_hasta, ultimo_dia_mes)
+
         movs = _qs_operacional(
-            MovimientoDiario.objects.filter(fecha__year=anio, fecha__month=mes)
+            MovimientoDiario.objects.filter(fecha__gte=desde_mes, fecha__lte=hasta_mes)
         )
         ingresos = sum((_monto_clp_robusto(m) for m in movs.filter(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
         egresos = sum((_monto_clp_robusto(m) for m in movs.exclude(tipo__in=_TIPOS_INGRESO)), Decimal('0'))
+
+        # Si el rango incluye más de un año, se agrega el año al label para
+        # evitar que Ene/Feb se repitan y parezcan el mismo mes.
+        cruza_anios = fecha_desde.year != fecha_hasta.year
+        mes_nombre = calendar.month_abbr[mes]
+        if cruza_anios:
+            mes_nombre = f"{mes_nombre} {anio}"
+
         resultado.append({
+            'anio': anio,
             'mes': mes,
-            'mes_nombre': calendar.month_abbr[mes],
+            'mes_nombre': mes_nombre,
+            'desde': str(desde_mes),
+            'hasta': str(hasta_mes),
             'ingresos': int(ingresos),
             'egresos': int(egresos),
             'resultado': int(ingresos - egresos),

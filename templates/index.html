@@ -1810,12 +1810,23 @@ async function cargarDashboard() {
         <button class="btn btn-secondary btn-sm" onclick="navTo('revision')">Revisar ahora →</button>
        </div>`
     : '';
-  // Inicializar selector de año flujo
+  // Inicializar/actualizar selector de año del flujo con años reales de movimientos.
+  // Antes se cargaba fijo desde el año actual, por eso el gráfico quedaba atado al 2026.
   const selAnio = document.getElementById('selector-anio-flujo');
-  if (selAnio && selAnio.options.length === 0) {
-    const anioHoy = new Date().getFullYear();
-    for (let y = anioHoy - 3; y <= anioHoy; y++) {
-      selAnio.innerHTML += `<option value="${y}" ${y===anioHoy?'selected':''}>${y}</option>`;
+  if (selAnio) {
+    const anios = (data.anios_disponibles && data.anios_disponibles.length)
+      ? data.anios_disponibles
+      : [new Date().getFullYear()];
+    const anioPeriodo = Number((desde || today()).slice(0, 4));
+    const opcionesActuales = Array.from(selAnio.options).map(o => Number(o.value));
+    const mismasOpciones = opcionesActuales.length === anios.length &&
+      opcionesActuales.every((v, i) => v === Number(anios[i]));
+
+    if (!mismasOpciones) {
+      selAnio.innerHTML = anios.map(y => `<option value="${y}">${y}</option>`).join('');
+    }
+    if (anios.includes(anioPeriodo)) {
+      selAnio.value = String(anioPeriodo);
     }
   }
 
@@ -1888,8 +1899,8 @@ function renderKpis(kpis, containerId) {
 
 async function cambiarAnioFlujo() {
   const anio = parseInt(document.getElementById('selector-anio-flujo').value);
-  const { desde, hasta } = getDesdeHasta();
-  // Pedir solo el flujo del año seleccionado
+  if (!anio) return;
+  // Pedir el flujo del año seleccionado. El backend ahora respeta desde/hasta.
   const data = await api(`/api/dashboard?desde=${anio}-01-01&hasta=${anio}-12-31`);
   renderChartFlujo(data.flujo_mensual, anio);
 }

@@ -12,7 +12,7 @@ import calendar
 from .models import (MovimientoDiario, CierreDiario, PresupuestoMensual,
                      ConfiguracionEmpresa, CuentaContable, CentroCosto,
                      CuentaFinanciera, ControlSaldoReal, ControlSaldoRealDetalle)
-from .utils import (get_resumen_periodo, get_flujo_mensual, get_ventas_por_dia,
+from .utils import (get_resumen_periodo, get_flujo_mensual, get_flujo_mensual_periodo, get_ventas_por_dia,
                     get_distribucion_gastos, get_kpis_salud, calcular_iva,
                     get_saldo_actual, get_saldo_por_cuenta, get_detalle_saldos_cuentas,
                     get_detalle_saldo_cuenta_paginado)
@@ -430,7 +430,9 @@ def dashboard_data(request):
 
     resumen     = get_resumen_periodo(fecha_desde, fecha_hasta)
     kpis        = get_kpis_salud(fecha_desde, fecha_hasta)
-    flujo       = get_flujo_mensual(hoy.year)
+    # El gráfico de Flujo Mensual debe respetar el rango filtrado por la UI.
+    # Antes se calculaba con hoy.year, quedando fijo en el año actual.
+    flujo       = get_flujo_mensual_periodo(fecha_desde, fecha_hasta)
     ventas_dia  = get_ventas_por_dia(fecha_desde, fecha_hasta)
     dist_gastos = get_distribucion_gastos(fecha_desde, fecha_hasta)
     saldo_actual= get_saldo_actual()
@@ -441,6 +443,12 @@ def dashboard_data(request):
     sin_clasificar = MovimientoDiario.objects.filter(
         categoria_normalizada='sin_clasificar'
     ).count()
+
+    anios_disponibles = [
+        d.year for d in MovimientoDiario.objects.dates('fecha', 'year', order='ASC')
+    ]
+    if not anios_disponibles:
+        anios_disponibles = [hoy.year]
 
     ultimos = MovimientoDiario.objects.select_related('cuenta_financiera').all()[:10]
     ultimos_data = [{
@@ -486,6 +494,7 @@ def dashboard_data(request):
         'sin_clasificar':      sin_clasificar,
         'ultimos_movimientos': ultimos_data,
         'control_saldos':      _serialize_control(latest_control, saldos_cta),
+        'anios_disponibles':   anios_disponibles,
         'periodo':             {'desde': str(fecha_desde), 'hasta': str(fecha_hasta)},
     })
 
