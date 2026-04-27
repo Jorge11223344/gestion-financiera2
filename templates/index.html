@@ -1,3 +1,4 @@
+python manage.py runserver
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1695,13 +1696,36 @@ function renderDashboardControlSaldos(control) {
 }
 
 async function cargarControlSaldos(fecha = '') {
-  const qs = fecha ? `?fecha=${fecha}` : '';
+  const qs = fecha ? `?fecha=${encodeURIComponent(fecha)}` : '';
   const data = await api(`/api/control-saldos${qs}`);
+  if (data.error) { showToast(data.error, 'error'); return; }
+
   ultimoControlSaldos = data.control || null;
+  window.__ultimasCuentasSistema = data.cuentas_sistema || [];
+
   renderDashboardControlSaldos(data.control);
   renderControlSaldosForm(data.control, data.cuentas_sistema || []);
   renderControlSaldosHistorial(data.historial || []);
   renderControlSaldosResumen(data.control);
+}
+
+async function cargarControlSaldosPorId(id) {
+  const data = await api(`/api/control-saldos/${id}`);
+  if (data.error) { showToast(data.error, 'error'); return; }
+
+  // El botón Ver debe cargar exactamente el control seleccionado del histórico,
+  // no buscar por fecha ni depender de cuál sea el último registro.
+  ultimoControlSaldos = data.control || null;
+
+  renderDashboardControlSaldos(data.control);
+  renderControlSaldosForm(data.control, window.__ultimasCuentasSistema || []);
+  renderControlSaldosResumen(data.control);
+
+  if (data.control?.fecha) {
+    document.getElementById('cs-fecha').value = data.control.fecha;
+  }
+
+  showToast('Control cargado para revisión');
 }
 
 function renderControlSaldosForm(control, cuentasSistema) {
@@ -1736,8 +1760,8 @@ function renderControlSaldosHistorial(historial) {
       <td>${fmt(h.pendiente_efectivo_clp || 0)}</td>
       <td>${h.cuentas}</td>
       <td style="display:flex;gap:6px;">
-        <button class="btn btn-secondary btn-sm" onclick="cargarControlSaldos('${h.fecha}')">Ver</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarControlSaldos(${h.id})">Eliminar</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="cargarControlSaldosPorId(${h.id})">Ver</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="eliminarControlSaldos(${h.id})">Eliminar</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin controles registrados.</td></tr>';
 }
