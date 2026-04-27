@@ -1697,7 +1697,7 @@ function renderDashboardControlSaldos(control) {
 
 async function cargarControlSaldos(fecha = '') {
   const qs = fecha ? `?fecha=${encodeURIComponent(fecha)}` : '';
-  const data = await api(`/api/control-saldos${qs}`);
+  const data = await api(`/api/control-saldos/${qs}`);
   if (data.error) { showToast(data.error, 'error'); return; }
 
   ultimoControlSaldos = data.control || null;
@@ -1710,7 +1710,7 @@ async function cargarControlSaldos(fecha = '') {
 }
 
 async function cargarControlSaldosPorId(id) {
-  const data = await api(`/api/control-saldos/${id}`);
+  const data = await api(`/api/control-saldos/${id}/`);
   if (data.error) { showToast(data.error, 'error'); return; }
 
   // El botón Ver debe cargar exactamente el control seleccionado del histórico,
@@ -1796,7 +1796,7 @@ async function guardarControlSaldos() {
     cuenta_financiera_id: i.dataset.cuentaId,
     saldo_real: parseFloat(i.value || 0),
   }));
-  const data = await api('/api/control-saldos', { method: 'POST', body: JSON.stringify({ fecha, pendiente_efectivo_clp: pendiente, notas, detalles }) });
+  const data = await api('/api/control-saldos/', { method: 'POST', body: JSON.stringify({ fecha, pendiente_efectivo_clp: pendiente, notas, detalles }) });
   if (data.error) { showToast(data.error, 'error'); return; }
   showToast('✅ Control de saldos guardado');
   await cargarControlSaldos(fecha);
@@ -1805,7 +1805,7 @@ async function guardarControlSaldos() {
 
 async function eliminarControlSaldos(id) {
   if (!confirm('¿Eliminar este control de saldos?')) return;
-  const data = await api(`/api/control-saldos/${id}`, { method: 'DELETE' });
+  const data = await api(`/api/control-saldos/${id}/`, { method: 'DELETE' });
   if (data.error) { showToast(data.error, 'error'); return; }
   showToast('🗑️ Control eliminado');
   await cargarControlSaldos();

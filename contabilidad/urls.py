@@ -26,8 +26,12 @@ urlpatterns = [
     path('api/configuracion', views.configuracion, name='configuracion'),
 
     # Control de saldos reales
+    # Se dejan ambas variantes (con y sin slash final) para evitar 404 desde el frontend
+    # si el navegador, Django/APPEND_SLASH o alguna versión anterior llama a una u otra forma.
     path('api/control-saldos', views.control_saldos, name='control_saldos'),
+    path('api/control-saldos/', views.control_saldos, name='control_saldos_slash'),
     path('api/control-saldos/<int:control_id>', views.control_saldos_detalle, name='control_saldos_detalle'),
+    path('api/control-saldos/<int:control_id>/', views.control_saldos_detalle, name='control_saldos_detalle_slash'),
 
     # Catálogos
     path('api/tipos', views.tipos_movimiento, name='tipos'),
